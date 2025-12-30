@@ -1,0 +1,21 @@
+{
+  "entity": "varieties",
+  "primaryKey": "id",
+  "displayField": "variety",
+  "fields": [
+    { "label": "Variety", "column": "variety", "type": "text", "editable": true, "required": true, "showInList": true },
+    { "label": "Scientific Name", "column": "scientific_name", "type": "text", "editable": true },
+    { "label": "Seed Weight", "column": "seed_weight_g_1020", "type": "number", "numberKind": "float", "unit": "g/1020", "editable": true, "showInList": true },
+    { "label": "Soak (hours)", "column": "soak_hours", "type": "number", "numberKind": "int", "editable": true },
+    { "label": "Blackout (days)", "column": "blackout_days", "type": "number", "numberKind": "int", "editable": true },
+    { "label": "Harvest Days", "column": "harvest_days", "type": "number", "numberKind": "int", "editable": true, "showInList": true },
+    { "label": "Expected Yield", "column": "expected_yield_oz_1020", "type": "number", "numberKind": "float", "unit": "oz/1020", "editable": true },
+    { "label": "Difficulty", "column": "difficulty", "type": "select", "options": ["Easy", "Moderate", "Challenging"], "editable": true, "showInList": true },
+    { "label": "Pro Tips", "column": "pro_tips", "type": "textarea", "editable": true },
+    { "label": "Flavor Profile", "column": "flavor_profile", "type": "text", "editable": true },
+    { "label": "Best Uses", "column": "best_uses", "type": "text", "editable": true },
+    { "label": "Visual Notes", "column": "visual_notes", "type": "textarea", "editable": true },
+    { "label": "Chef Notes", "column": "chef_notes", "type": "textarea", "editable": true },
+    { "label": "Market Notes", "column": "market_notes", "type": "textarea", "editable": true }
+  ]
+}
