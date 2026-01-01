@@ -1,14 +1,4 @@
-// src/pages/OrderDetailPage.tsx
-// VIEW + EDIT + DELETE Order (Vite + React Router)
-//
-// Supports URL styles:
-// 1) /orders/<orderId>
-// 2) /orders/<customerId>__<YYYY-MM-DD>__<key>
-//    - key is optional; if numeric we try quantity=key, otherwise we ignore it
-//
-// Long-term: fix your Orders list to link to /orders/<order.id>
-
-import React, { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../utils/supabaseClient";
 
@@ -30,76 +20,28 @@ type VarietyRow = { id: string; variety: string };
 const UUID_RE =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-const YMD_RE = /^\d{4}-\d{2}-\d{2}$/;
+type FormState = {
+  customer_id: string;
+  variety_id: string;
+  quantity: number;
+  delivery_date: string;
+  status: OrderStatus;
+};
 
-function friendlySupabaseError(msg: string) {
-  if (!msg) return "Something went wrong.";
-  if (msg.includes("Active tray limit reached")) {
-    return "You’ve hit your plan’s Active Trays limit. Upgrade to add more trays.";
-  }
-  if (msg.includes("Variety limit reached")) {
-    return "You’ve hit your plan’s Variety limit. Upgrade to add more varieties.";
-  }
-  return msg;
-}
-
-function getRawRef(): string {
-  // Route param could be named id/orderId/etc; for Vite apps it depends on App.tsx
-  const params = useParams();
-  const search = new URLSearchParams(window.location.search);
-
-  return (
-    (params as any).id ||
-    (params as any).orderId ||
-    (params as any).order_id ||
-    search.get("id") ||
-    search.get("orderId") ||
-    search.get("order_id") ||
-    ""
-  );
-}
-
-function parseComposite(raw: string): {
-  orderId?: string;
-  customerId?: string;
-  deliveryDate?: string;
-  key?: string;
-  keyNumber?: number;
-} {
-  if (!raw) return {};
-
-  // direct UUID order id
-  if (UUID_RE.test(raw)) return { orderId: raw };
-
-  // composite <uuid>__<yyyy-mm-dd>__<key>
-  if (raw.includes("__")) {
-    const [a, b, c] = raw.split("__");
-    const out: any = { key: c };
-
-    if (UUID_RE.test(a)) out.customerId = a;
-    if (YMD_RE.test(b)) out.deliveryDate = b;
-    if (c && /^\d+$/.test(c)) out.keyNumber = Number(c);
-
-    // If someone accidentally passed an orderId followed by extras, catch that too:
-    if (UUID_RE.test(a) && !out.deliveryDate) {
-      // still treat a as potential order id if date missing
-      out.orderId = a;
-    }
-
-    return out;
-  }
-
-  // last resort: maybe it's a path segment with slashes
-  const last = raw.split("/").pop() ?? "";
-  if (UUID_RE.test(last)) return { orderId: last };
-
-  return {};
-}
+const EMPTY_FORM: FormState = {
+  customer_id: "",
+  variety_id: "",
+  quantity: 1,
+  delivery_date: "",
+  status: "draft",
+};
 
 export default function OrderDetailPage() {
   const navigate = useNavigate();
-  const rawRef = getRawRef();
-  const parsed = useMemo(() => parseComposite(rawRef), [rawRef]);
+  const params = useParams();
+
+  // supports /orders/:id or /orders/:orderId
+  const rawId = (params as any).id || (params as any).orderId || "";
 
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -112,13 +54,7 @@ export default function OrderDetailPage() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [varieties, setVarieties] = useState<VarietyRow[]>([]);
 
-  const [form, setForm] = useState<{
-    customer_id: string;
-    variety_id: string;
-    quantity: number;
-    delivery_date: string;
-    status: OrderStatus;
-  } | null>(null);
+  const [form, setForm] = useState<FormState | null>(null);
 
   const customerName = useMemo(() => {
     if (!form) return "";
@@ -139,111 +75,54 @@ export default function OrderDetailPage() {
         setError(null);
         setSuccess(null);
 
-        if (!rawRef) throw new Error("Missing order reference in URL.");
+        if (!rawId || !UUID_RE.test(rawId)) {
+          throw new Error("Invalid order link. (Missing or invalid order id)");
+        }
 
-        // Load dropdown options
+        // dropdown data
         const [{ data: c, error: cErr }, { data: v, error: vErr }] = await Promise.all([
           supabase.from("customers").select("id, name").order("name", { ascending: true }),
           supabase.from("varieties").select("id, variety").order("variety", { ascending: true }),
         ]);
+
         if (cErr) throw new Error(cErr.message);
         if (vErr) throw new Error(vErr.message);
 
         if (!mounted) return;
-        setCustomers((c ?? []) as CustomerRow[]);
-        setVarieties((v ?? []) as VarietyRow[]);
 
-        // 1) Try fetch by real order id
-        if (parsed.orderId && UUID_RE.test(parsed.orderId)) {
-          const { data: o, error: oErr } = await supabase
-            .from("orders")
-            .select("id, customer_id, variety_id, quantity, delivery_date, status, created_at")
-            .eq("id", parsed.orderId)
-            .single();
+        const cRows = (c ?? []) as CustomerRow[];
+        const vRows = (v ?? []) as VarietyRow[];
 
-          if (oErr) throw new Error(oErr.message);
-          if (!o) throw new Error("Order not found.");
+        setCustomers(cRows);
+        setVarieties(vRows);
 
-          if (!mounted) return;
-          const orderRow = o as OrderRow;
-          setOrder(orderRow);
-          setForm({
-            customer_id: orderRow.customer_id,
-            variety_id: orderRow.variety_id,
-            quantity: Number(orderRow.quantity ?? 0),
-            delivery_date: orderRow.delivery_date,
-            status: (orderRow.status as OrderStatus) ?? "draft",
-          });
-          return;
-        }
+        // order
+        const { data: o, error: oErr } = await supabase
+          .from("orders")
+          .select("id, customer_id, variety_id, quantity, delivery_date, status, created_at")
+          .eq("id", rawId)
+          .single();
 
-        // 2) If composite: lookup by customer_id + delivery_date (+ maybe quantity)
-        if (parsed.customerId && parsed.deliveryDate) {
-          // base query
-          let q = supabase
-            .from("orders")
-            .select("id, customer_id, variety_id, quantity, delivery_date, status, created_at")
-            .eq("customer_id", parsed.customerId)
-            .eq("delivery_date", parsed.deliveryDate);
+        if (oErr) throw new Error(oErr.message);
+        if (!o) throw new Error("Order not found.");
 
-          // If key looks numeric, try matching quantity first (more precise)
-          if (typeof parsed.keyNumber === "number" && Number.isFinite(parsed.keyNumber)) {
-            q = q.eq("quantity", parsed.keyNumber);
-          }
+        if (!mounted) return;
 
-          // Get most recent match
-          const { data: rows, error: qErr } = await q
-            .order("created_at", { ascending: false })
-            .limit(1);
+        const row = o as OrderRow;
+        setOrder(row);
 
-          if (qErr) throw new Error(qErr.message);
-
-          const found = (rows ?? [])[0] as OrderRow | undefined;
-
-          // If quantity-match failed, fallback to "most recent for that date"
-          if (!found && typeof parsed.keyNumber === "number") {
-            const { data: rows2, error: qErr2 } = await supabase
-              .from("orders")
-              .select("id, customer_id, variety_id, quantity, delivery_date, status, created_at")
-              .eq("customer_id", parsed.customerId)
-              .eq("delivery_date", parsed.deliveryDate)
-              .order("created_at", { ascending: false })
-              .limit(1);
-
-            if (qErr2) throw new Error(qErr2.message);
-            const found2 = (rows2 ?? [])[0] as OrderRow | undefined;
-            if (!found2) throw new Error("Order not found for that customer + delivery date.");
-            if (!mounted) return;
-
-            setOrder(found2);
-            setForm({
-              customer_id: found2.customer_id,
-              variety_id: found2.variety_id,
-              quantity: Number(found2.quantity ?? 0),
-              delivery_date: found2.delivery_date,
-              status: (found2.status as OrderStatus) ?? "draft",
-            });
-            return;
-          }
-
-          if (!found) throw new Error("Order not found for that customer + delivery date.");
-          if (!mounted) return;
-
-          setOrder(found);
-          setForm({
-            customer_id: found.customer_id,
-            variety_id: found.variety_id,
-            quantity: Number(found.quantity ?? 0),
-            delivery_date: found.delivery_date,
-            status: (found.status as OrderStatus) ?? "draft",
-          });
-          return;
-        }
-
-        throw new Error("Invalid order reference format.");
+        setForm({
+          customer_id: String(row.customer_id ?? ""),
+          variety_id: String(row.variety_id ?? ""),
+          quantity: Number(row.quantity ?? 0),
+          delivery_date: String(row.delivery_date ?? ""),
+          status: ((row.status as OrderStatus) ?? "draft") as OrderStatus,
+        });
       } catch (e: any) {
         if (!mounted) return;
-        setError(friendlySupabaseError(e?.message ?? "Failed to load order"));
+        setError(e?.message ?? "Failed to load order");
+        setForm(null);
+        setOrder(null);
       } finally {
         if (!mounted) return;
         setLoading(false);
@@ -253,7 +132,7 @@ export default function OrderDetailPage() {
     return () => {
       mounted = false;
     };
-  }, [rawRef, parsed.orderId, parsed.customerId, parsed.deliveryDate, parsed.keyNumber]);
+  }, [rawId]);
 
   async function onSave() {
     if (!order?.id || !form) return;
@@ -285,20 +164,22 @@ export default function OrderDetailPage() {
         .single();
 
       if (error) throw new Error(error.message);
+      if (!data) throw new Error("Update failed.");
 
       const updated = data as OrderRow;
       setOrder(updated);
+
       setForm({
-        customer_id: updated.customer_id,
-        variety_id: updated.variety_id,
+        customer_id: String(updated.customer_id ?? ""),
+        variety_id: String(updated.variety_id ?? ""),
         quantity: Number(updated.quantity ?? 0),
-        delivery_date: updated.delivery_date,
-        status: (updated.status as OrderStatus) ?? "draft",
+        delivery_date: String(updated.delivery_date ?? ""),
+        status: ((updated.status as OrderStatus) ?? "draft") as OrderStatus,
       });
 
       setSuccess("Order updated.");
     } catch (e: any) {
-      setError(friendlySupabaseError(e?.message ?? "Failed to update order"));
+      setError(e?.message ?? "Failed to update order");
     } finally {
       setSaving(false);
     }
@@ -307,9 +188,7 @@ export default function OrderDetailPage() {
   async function onDelete() {
     if (!order?.id) return;
 
-    const ok = window.confirm(
-      "Delete this order? This will also remove its linked production (grow) record."
-    );
+    const ok = window.confirm("Delete this order? This cannot be undone.");
     if (!ok) return;
 
     try {
@@ -322,7 +201,7 @@ export default function OrderDetailPage() {
 
       navigate(-1);
     } catch (e: any) {
-      setError(friendlySupabaseError(e?.message ?? "Failed to delete order"));
+      setError(e?.message ?? "Failed to delete order");
     } finally {
       setDeleting(false);
     }
@@ -331,11 +210,11 @@ export default function OrderDetailPage() {
   function resetToSaved() {
     if (!order) return;
     setForm({
-      customer_id: order.customer_id,
-      variety_id: order.variety_id,
+      customer_id: String(order.customer_id ?? ""),
+      variety_id: String(order.variety_id ?? ""),
       quantity: Number(order.quantity ?? 0),
-      delivery_date: order.delivery_date,
-      status: (order.status as OrderStatus) ?? "draft",
+      delivery_date: String(order.delivery_date ?? ""),
+      status: ((order.status as OrderStatus) ?? "draft") as OrderStatus,
     });
     setSuccess(null);
     setError(null);
@@ -352,31 +231,9 @@ export default function OrderDetailPage() {
 
   if (!form) {
     return (
-      <div style={{ padding: 16, maxWidth: 780 }}>
+      <div style={{ padding: 16 }}>
         <h2>Order</h2>
         <p>Not found.</p>
-        <div style={{ opacity: 0.75, fontSize: 13, marginBottom: 12 }}>
-          Debug:
-          <div>
-            rawRef: <code>{rawRef || "(empty)"}</code>
-          </div>
-          <div>
-            parsed:{" "}
-            <code>
-              {JSON.stringify(
-                {
-                  orderId: parsed.orderId,
-                  customerId: parsed.customerId,
-                  deliveryDate: parsed.deliveryDate,
-                  key: parsed.key,
-                  keyNumber: parsed.keyNumber,
-                },
-                null,
-                0
-              )}
-            </code>
-          </div>
-        </div>
         <button
           onClick={() => navigate(-1)}
           style={{ padding: "10px 12px", borderRadius: 10, border: "1px solid #ddd" }}
@@ -435,9 +292,15 @@ export default function OrderDetailPage() {
           <span style={{ fontWeight: 600 }}>Customer</span>
           <select
             value={form.customer_id}
-            onChange={(e) => setForm((p) => ({ ...p, customer_id: e.target.value }))}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...(prev ?? EMPTY_FORM),
+                customer_id: String(e.target.value ?? ""),
+              }))
+            }
             style={{ padding: 10, borderRadius: 8 }}
           >
+            <option value="">Select a customer…</option>
             {customers.map((c) => (
               <option key={c.id} value={c.id}>
                 {c.name}
@@ -451,9 +314,15 @@ export default function OrderDetailPage() {
           <span style={{ fontWeight: 600 }}>Variety</span>
           <select
             value={form.variety_id}
-            onChange={(e) => setForm((p) => ({ ...p, variety_id: e.target.value }))}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...(prev ?? EMPTY_FORM),
+                variety_id: String(e.target.value ?? ""),
+              }))
+            }
             style={{ padding: 10, borderRadius: 8 }}
           >
+            <option value="">Select a variety…</option>
             {varieties.map((v) => (
               <option key={v.id} value={v.id}>
                 {v.variety}
@@ -470,7 +339,12 @@ export default function OrderDetailPage() {
             min={1}
             step={1}
             value={form.quantity}
-            onChange={(e) => setForm((p) => ({ ...p, quantity: Number(e.target.value) }))}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...(prev ?? EMPTY_FORM),
+                quantity: Number(e.target.value),
+              }))
+            }
             style={{ padding: 10, borderRadius: 8 }}
           />
         </label>
@@ -480,7 +354,12 @@ export default function OrderDetailPage() {
           <input
             type="date"
             value={form.delivery_date}
-            onChange={(e) => setForm((p) => ({ ...p, delivery_date: e.target.value }))}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...(prev ?? EMPTY_FORM),
+                delivery_date: String(e.target.value ?? ""),
+              }))
+            }
             style={{ padding: 10, borderRadius: 8 }}
           />
         </label>
@@ -489,7 +368,12 @@ export default function OrderDetailPage() {
           <span style={{ fontWeight: 600 }}>Status</span>
           <select
             value={form.status}
-            onChange={(e) => setForm((p) => ({ ...p, status: e.target.value as OrderStatus }))}
+            onChange={(e) =>
+              setForm((prev) => ({
+                ...(prev ?? EMPTY_FORM),
+                status: e.target.value as OrderStatus,
+              }))
+            }
             style={{ padding: 10, borderRadius: 8 }}
           >
             <option value="draft">draft</option>
@@ -503,13 +387,7 @@ export default function OrderDetailPage() {
           <button
             onClick={onSave}
             disabled={saving}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              fontWeight: 700,
-              cursor: saving ? "not-allowed" : "pointer",
-            }}
+            style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #ddd", fontWeight: 700 }}
           >
             {saving ? "Saving…" : "Save changes"}
           </button>
@@ -517,12 +395,7 @@ export default function OrderDetailPage() {
           <button
             onClick={resetToSaved}
             disabled={saving || deleting}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              cursor: saving || deleting ? "not-allowed" : "pointer",
-            }}
+            style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #ddd" }}
           >
             Reset
           </button>
@@ -530,12 +403,7 @@ export default function OrderDetailPage() {
           <button
             onClick={() => navigate(-1)}
             disabled={saving || deleting}
-            style={{
-              padding: "12px 14px",
-              borderRadius: 10,
-              border: "1px solid #ddd",
-              cursor: saving || deleting ? "not-allowed" : "pointer",
-            }}
+            style={{ padding: "12px 14px", borderRadius: 10, border: "1px solid #ddd" }}
           >
             Back
           </button>
@@ -549,18 +417,12 @@ export default function OrderDetailPage() {
               border: "1px solid #f2b8b5",
               background: "#fff5f5",
               fontWeight: 700,
-              cursor: saving || deleting ? "not-allowed" : "pointer",
               marginLeft: "auto",
             }}
           >
             {deleting ? "Deleting…" : "Delete order"}
           </button>
         </div>
-
-        <small style={{ opacity: 0.7 }}>
-          Your current “View Order” URLs are composite (customerId + date + key). This page resolves them
-          by looking up the order. For cleaner URLs, update links to use <code>/orders/&lt;order.id&gt;</code>.
-        </small>
       </div>
     </div>
   );

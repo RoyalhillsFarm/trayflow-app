@@ -1,16 +1,22 @@
 // src/utils/formatDate.ts
 // Simple helpers for formatting dates for display in TrayFlow.
 
-/**
- * Convert a date string like "2025-12-10" to "12-10-2025".
- * If the input is missing or not in the expected format, we
- * just return the original string so we never crash the app.
- */
-export function formatDisplayDate(value: string | null | undefined): string {
+export function formatDisplayDate(value: string | Date | null | undefined): string {
   if (!value) return "";
 
-  // Handle plain "YYYY-MM-DD" (what <input type="date"> gives us)
-  const parts = value.split("T")[0].split("-");
+  // If we were passed a Date object, convert it to YYYY-MM-DD in local time
+  if (value instanceof Date) {
+    const yyyy = value.getFullYear();
+    const mm = String(value.getMonth() + 1).padStart(2, "0");
+    const dd = String(value.getDate()).padStart(2, "0");
+    return `${mm}-${dd}-${yyyy}`;
+  }
+
+  // value is a string
+  const str = String(value);
+
+  // Handle ISO strings like "2025-12-10T00:00:00.000Z"
+  const parts = str.split("T")[0].split("-");
   if (parts.length === 3) {
     const [year, month, day] = parts;
     if (year && month && day) {
@@ -19,5 +25,5 @@ export function formatDisplayDate(value: string | null | undefined): string {
   }
 
   // Fallback – if it’s some other format, just show it as-is.
-  return value;
+  return str;
 }
