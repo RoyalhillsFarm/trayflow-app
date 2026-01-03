@@ -114,6 +114,24 @@ body {
   padding: 10px 6px 4px 6px;
 }
 
+/* ---- Mobile-only sidebar header (Close button area) ---- */
+.sidebar-mobile-top {
+  display: none; /* hidden on desktop */
+  align-items: center;
+  justify-content: flex-end;
+  margin-bottom: 8px;
+}
+
+.sidebar-close {
+  border: 1px solid rgba(255, 255, 255, 0.25);
+  background: rgba(255, 255, 255, 0.08);
+  color: #fff;
+  border-radius: 12px;
+  padding: 10px 12px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
 /* --------- Topbar --------- */
 .topbar {
   height: 72px;
@@ -125,6 +143,23 @@ body {
   background: #ffffff;
   border-bottom: 1px solid #e7eef8;
   padding: 0 20px;
+}
+
+.topbar-left {
+  position: absolute;
+  left: 12px;
+  display: flex;
+  align-items: center;
+}
+
+.topbar-menu {
+  display: none; /* only show on phones */
+  font-size: 18px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0, 0, 0, 0.18);
+  border-radius: 12px;
+  background: #fff;
+  cursor: pointer;
 }
 
 .topbar-center {
@@ -182,27 +217,76 @@ body {
   color: #475569;
   margin-top: 10px;
 }
-/* TrayFlow App CSS */
 
-/* ===============================
-   MOBILE FIX (phones)
-   =============================== */
+/* =========================================================
+   MOBILE (iPhone) — slide-out sidebar + overlay + sizing
+   ========================================================= */
 @media (max-width: 768px) {
-  .sidebar {
-    display: none !important;
+  /* Make sure the content uses full width */
+  .app-shell {
+    display: flex;
   }
 
+  /* Show hamburger on mobile */
+  .topbar-menu {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+  }
+
+  /* Make the title not get crushed on small screens */
+  .topbar-title {
+    letter-spacing: 0.18em;
+  }
+
+  /* Sidebar becomes a drawer on mobile */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    left: 0;
+    height: 100vh;
+    width: 280px;
+    min-width: 0;
+    transform: translateX(-110%);
+    transition: transform 180ms ease;
+    z-index: 1000;
+    padding-bottom: 18px;
+  }
+
+  .sidebar-mobile-top {
+    display: flex;
+  }
+
+  /* When open */
+  .sidebar.sidebar-open {
+    transform: translateX(0);
+  }
+
+  /* Overlay behind the drawer */
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.45);
+    z-index: 900;
+  }
+
+  /* Main area should be full width; no sidebar taking space */
   .app-main {
-    margin-left: 0 !important;
-    width: 100% !important;
+    width: 100%;
   }
 
   .app-main-content {
-    padding: 16px !important;
+    padding: 16px;
   }
 
-  .topbar {
-    padding-left: 16px !important;
-    padding-right: 16px !important;
+  /* Reduce giant titles on phones so they fit */
+  .page-title {
+    font-size: 36px;
+  }
+
+  /* Prevent pills/cards from forcing sideways scroll */
+  .page * {
+    max-width: 100%;
+    box-sizing: border-box;
   }
 }
