@@ -213,9 +213,21 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 }
 
 /* ----------------- LAYOUT ----------------- */
-function Sidebar() {
+function Sidebar({
+  isOpen,
+  onClose,
+}: {
+  isOpen: boolean;
+  onClose: () => void;
+}) {
   return (
-    <aside className="sidebar">
+    <aside className={["sidebar", isOpen ? "sidebar-open" : ""].join(" ")}>
+      <div className="sidebar-mobile-top">
+        <button className="sidebar-close" onClick={onClose} aria-label="Close menu">
+          ✕
+        </button>
+      </div>
+
       <div className="sidebar-logo-block">
         <img src={trayflowLogo} alt="TrayFlow Logo" className="sidebar-logo-image" />
         <div className="sidebar-logo-text">
@@ -223,7 +235,7 @@ function Sidebar() {
         </div>
       </div>
 
-      <nav className="sidebar-nav">
+      <nav className="sidebar-nav" onClick={onClose}>
         <SidebarLink to="/" label="Dashboard" />
         <SidebarLink to="/orders" label="Orders" />
         <SidebarLink to="/tasks" label="Tasks" />
@@ -256,7 +268,7 @@ function SidebarLink({ to, label }: { to: string; label: string }) {
   );
 }
 
-function TopBar() {
+function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   const location = useLocation();
   const navigate = useNavigate();
   const showNewTaskButton = location.pathname === "/tasks";
@@ -279,6 +291,12 @@ function TopBar() {
 
   return (
     <header className="topbar">
+      <div className="topbar-left">
+        <button className="topbar-menu" onClick={onOpenMenu} aria-label="Open menu">
+          ☰
+        </button>
+      </div>
+
       <div className="topbar-center">
         <img src={trayflowIcon} alt="TrayFlow Icon" className="topbar-logo-image" />
         <span className="topbar-title">TRAYFLOW</span>
@@ -298,7 +316,6 @@ function TopBar() {
               className="topbar-button"
               onClick={async () => {
                 await supabase.auth.signOut();
-                // after sign out, go to login (don’t show dashboard)
                 navigate("/login", { replace: true });
               }}
             >
@@ -519,9 +536,6 @@ function OrdersPage() {
   return (
     <div className="page">
       <h1 className="page-title">Orders</h1>
-
-      {/* ... your Orders page remains unchanged below ... */}
-      {/* (kept as-is from your version) */}
 
       <div
         style={{
@@ -959,14 +973,16 @@ function NewOrderPage() {
   return (
     <div className="page">
       <h1 className="page-title">New Order</h1>
-      {/* Your NewOrderPage UI stays the same below — kept as-is in your file */}
-      {/* (omitted here for brevity; keep your existing JSX exactly) */}
-      {/* IMPORTANT: do not change anything else in this component */}
-      {/* If you want, I can paste the full component too, but it’s unchanged */}
+
+      {/* NOTE: You had this placeholder in the version you pasted.
+          If your real project has the full New Order UI, paste it back here. */}
       <p className="page-text">
         Your New Order page code is unchanged — keep your existing JSX here.
       </p>
-      <button onClick={() => navigate("/orders")} style={secondaryBtn}>Back</button>
+
+      <button onClick={() => navigate("/orders")} style={secondaryBtn}>
+        Back
+      </button>
     </div>
   );
 }
@@ -984,21 +1000,32 @@ function SettingsPage() {
 function AppShell() {
   const location = useLocation();
 
+  // Mobile menu state
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  useEffect(() => {
+    // close menu on route change
+    setMenuOpen(false);
+  }, [location.pathname]);
+
   // On /login we don't want to show the whole app chrome.
   const isLogin = location.pathname === "/login";
 
   if (isLogin) {
-    // If already signed in, bounce home.
-    // (This prevents logged-in users from seeing the login screen.)
     return <LoginGate />;
   }
 
   return (
     <RequireAuth>
       <div className="app-shell">
-        <Sidebar />
+        <Sidebar isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
+
+        {menuOpen && (
+          <div className="sidebar-overlay" onClick={() => setMenuOpen(false)} />
+        )}
+
         <div className="app-main">
-          <TopBar />
+          <TopBar onOpenMenu={() => setMenuOpen(true)} />
           <main className="app-main-content">
             <Routes>
               <Route path="/" element={<DashboardPage />} />
@@ -1069,7 +1096,6 @@ function LoginGate() {
 export default function App() {
   return (
     <BrowserRouter>
-      {/* Route /login is handled by AppShell/LoginGate above */}
       <AppShell />
     </BrowserRouter>
   );
