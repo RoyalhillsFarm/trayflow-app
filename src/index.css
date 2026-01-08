@@ -66,3 +66,76 @@ button:focus-visible {
     background-color: #f9f9f9;
   }
 }
+/* --- Mobile-friendly app shell --- */
+.app-shell {
+  display: grid;
+  grid-template-columns: 280px 1fr;
+  min-height: 100vh;
+}
+
+.sidebar {
+  border-right: 1px solid rgba(0,0,0,0.08);
+  background: #fff;
+}
+
+.app-main {
+  min-width: 0;
+  padding: 16px;
+}
+
+/* Mobile top bar */
+.mobile-topbar {
+  display: none;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 16px;
+  border-bottom: 1px solid rgba(0,0,0,0.08);
+  position: sticky;
+  top: 0;
+  background: #fff;
+  z-index: 10;
+}
+
+.mobile-menu-button {
+  font-size: 18px;
+  padding: 10px 12px;
+  border: 1px solid rgba(0,0,0,0.2);
+  border-radius: 10px;
+  background: #fff;
+}
+
+/* Drawer overlay */
+.drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.35);
+  z-index: 50;
+}
+
+.drawer {
+  position: fixed;
+  top: 0;
+  left: 0;
+  height: 100%;
+  width: 85%;
+  max-width: 320px;
+  background: #fff;
+  padding: 16px;
+  z-index: 60;
+  overflow-y: auto;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+}
+
+/* Mobile rules */
+@media (max-width: 768px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .sidebar {
+    display: none;
+  }
+  .mobile-topbar {
+    display: flex;
+  }
+}
+

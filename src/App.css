@@ -5,6 +5,11 @@ html,
 body,
 #root {
   height: 100%;
+  width: 100%;
+}
+
+* {
+  box-sizing: border-box;
 }
 
 body {
@@ -30,7 +35,6 @@ body {
   display: flex;
   flex-direction: column;
   padding: 18px 16px;
-  box-sizing: border-box;
   background: linear-gradient(180deg, #0b3b2c 0%, #0a2f34 100%);
   color: #ffffff;
 }
@@ -49,7 +53,6 @@ body {
   min-width: 0;
   overflow-y: auto;
   padding: 24px;
-  box-sizing: border-box;
 }
 
 /* --------- Sidebar --------- */
@@ -64,12 +67,6 @@ body {
   width: 140px;
   height: auto;
   display: block;
-}
-
-.sidebar-logo-text {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
 }
 
 .sidebar-subtitle {
@@ -103,33 +100,11 @@ body {
   color: #ffffff;
 }
 
-.sidebar-link-inactive {
-  background: transparent;
-}
-
 .sidebar-footer {
   margin-top: auto;
   font-size: 12px;
   opacity: 0.8;
   padding: 10px 6px 4px 6px;
-}
-
-/* ---- Mobile-only sidebar header (Close button area) ---- */
-.sidebar-mobile-top {
-  display: none; /* hidden on desktop */
-  align-items: center;
-  justify-content: flex-end;
-  margin-bottom: 8px;
-}
-
-.sidebar-close {
-  border: 1px solid rgba(255, 255, 255, 0.25);
-  background: rgba(255, 255, 255, 0.08);
-  color: #fff;
-  border-radius: 12px;
-  padding: 10px 12px;
-  font-size: 16px;
-  cursor: pointer;
 }
 
 /* --------- Topbar --------- */
@@ -143,23 +118,6 @@ body {
   background: #ffffff;
   border-bottom: 1px solid #e7eef8;
   padding: 0 20px;
-}
-
-.topbar-left {
-  position: absolute;
-  left: 12px;
-  display: flex;
-  align-items: center;
-}
-
-.topbar-menu {
-  display: none; /* only show on phones */
-  font-size: 18px;
-  padding: 10px 12px;
-  border: 1px solid rgba(0, 0, 0, 0.18);
-  border-radius: 12px;
-  background: #fff;
-  cursor: pointer;
 }
 
 .topbar-center {
@@ -219,74 +177,54 @@ body {
 }
 
 /* =========================================================
-   MOBILE (iPhone) — slide-out sidebar + overlay + sizing
+   MOBILE (iPhone) — 10% bigger, without touching desktop
    ========================================================= */
 @media (max-width: 768px) {
-  /* Make sure the content uses full width */
+  /* Keep layout full-width on mobile */
   .app-shell {
-    display: flex;
+    display: block;
+    height: auto;
+    min-height: 100vh;
   }
 
-  /* Show hamburger on mobile */
-  .topbar-menu {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  /* Make the title not get crushed on small screens */
-  .topbar-title {
-    letter-spacing: 0.18em;
-  }
-
-  /* Sidebar becomes a drawer on mobile */
+  /* Sidebar is hidden; hamburger drawer handles nav */
   .sidebar {
-    position: fixed;
-    top: 0;
-    left: 0;
-    height: 100vh;
-    width: 280px;
-    min-width: 0;
-    transform: translateX(-110%);
-    transition: transform 180ms ease;
-    z-index: 1000;
-    padding-bottom: 18px;
+    display: none;
   }
 
-  .sidebar-mobile-top {
-    display: flex;
-  }
-
-  /* When open */
-  .sidebar.sidebar-open {
-    transform: translateX(0);
-  }
-
-  /* Overlay behind the drawer */
-  .sidebar-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(15, 23, 42, 0.45);
-    z-index: 900;
-  }
-
-  /* Main area should be full width; no sidebar taking space */
   .app-main {
-    width: 100%;
+    height: auto;
+    min-height: 100vh;
   }
 
   .app-main-content {
-    padding: 16px;
+    padding: 18px; /* slightly larger padding */
   }
 
-  /* Reduce giant titles on phones so they fit */
+  /* Make text/UI feel ~10% bigger on iPhone */
+  body {
+    font-size: 110%;
+  }
+
+  /* Make the big page titles less huge on phone */
   .page-title {
-    font-size: 36px;
+    font-size: 42px;
   }
 
-  /* Prevent pills/cards from forcing sideways scroll */
-  .page * {
-    max-width: 100%;
-    box-sizing: border-box;
+  /* Make topbar a bit roomier on phone */
+  .topbar {
+    min-height: 64px;
+    height: auto;
+    padding: 10px 12px;
+  }
+
+  .topbar-title {
+    font-size: 13px;
+    letter-spacing: 0.22em;
+  }
+
+  .topbar-button {
+    padding: 10px 14px;
+    font-size: 14px;
   }
 }

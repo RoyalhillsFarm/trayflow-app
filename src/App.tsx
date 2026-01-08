@@ -1,4 +1,11 @@
 // src/App.tsx
+import React, {
+  useEffect,
+  useMemo,
+  useState,
+  type CSSProperties,
+  type FormEvent,
+} from "react";
 import {
   BrowserRouter,
   Routes,
@@ -8,7 +15,6 @@ import {
   useNavigate,
   Navigate,
 } from "react-router-dom";
-import { useEffect, useMemo, useState, type CSSProperties, type FormEvent } from "react";
 import "./App.css";
 
 import trayflowLogo from "./assets/trayflow-logo.png";
@@ -36,6 +42,31 @@ import {
   type Order,
   type OrderStatus,
 } from "./lib/supabaseStorage";
+
+/* ----------------- MOBILE DETECTOR ----------------- */
+function useIsMobile() {
+  const [isMobile, setIsMobile] = useState(false);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 768px)");
+    const update = () => setIsMobile(mq.matches);
+    update();
+
+    // Newer browsers
+    if ("addEventListener" in mq) {
+      mq.addEventListener("change", update);
+      return () => mq.removeEventListener("change", update);
+    }
+
+    // Older Safari
+    // @ts-ignore
+    mq.addListener(update);
+    // @ts-ignore
+    return () => mq.removeListener(update);
+  }, []);
+
+  return isMobile;
+}
 
 /* ----------------- DATE HELPERS ----------------- */
 function toYMD(d: Date): string {
@@ -70,6 +101,12 @@ function parseCreatedAtToMs(created_at?: string | null): number {
 
 /* ----------------- ORDER GROUPING (NO DB CHANGES) ----------------- */
 const GROUP_BUCKET_MINUTES = 5;
+
+function normalizeStatus(s: any): OrderStatus {
+  const v = String(s ?? "").toLowerCase();
+  if (v === "draft" || v === "confirmed" || v === "packed" || v === "delivered") return v;
+  return "confirmed";
+}
 
 function groupKeyForLine(o: Order): string {
   const ms = parseCreatedAtToMs((o as any).created_at);
@@ -113,15 +150,19 @@ function buildOrderGroups(orders: Order[]): OrderGroup[] {
         key: k,
         customerId: o.customerId,
         deliveryDate: o.deliveryDate,
-        status: o.status,
+        status: normalizeStatus(o.status),
         createdAtMs: ms,
-        lines: [o],
+        lines: [{ ...o, status: normalizeStatus(o.status) }],
       });
     } else {
-      existing.lines.push(o);
-      existing.createdAtMs = Math.min(existing.createdAtMs || ms, ms || existing.createdAtMs);
+      const normalizedLine = { ...o, status: normalizeStatus(o.status) };
+      existing.lines.push(normalizedLine);
+      existing.createdAtMs = Math.min(
+        existing.createdAtMs || ms,
+        ms || existing.createdAtMs
+      );
 
-      const statuses = new Set(existing.lines.map((x) => x.status));
+      const statuses = new Set(existing.lines.map((x) => normalizeStatus(x.status)));
       existing.status = statuses.has("draft")
         ? "draft"
         : statuses.has("confirmed")
@@ -199,7 +240,14 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
 
   if (checking) {
     return (
-      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+      <div
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          padding: 24,
+        }}
+      >
         <div style={{ opacity: 0.7, fontWeight: 700 }}>Loading…</div>
       </div>
     );
@@ -212,39 +260,42 @@ function RequireAuth({ children }: { children: React.ReactNode }) {
   return <>{children}</>;
 }
 
-/* ----------------- LAYOUT ----------------- */
-function Sidebar({
-  isOpen,
-  onClose,
-}: {
-  isOpen: boolean;
-  onClose: () => void;
-}) {
+/* ----------------- NAV (shared links) ----------------- */
+function AppNavLinks({ onClick }: { onClick?: () => void }) {
   return (
-    <aside className={["sidebar", isOpen ? "sidebar-open" : ""].join(" ")}>
-      <div className="sidebar-mobile-top">
-        <button className="sidebar-close" onClick={onClose} aria-label="Close menu">
-          ✕
-        </button>
-      </div>
+    <nav className="sidebar-nav">
+      <SidebarLink to="/" label="Dashboard" onClick={onClick} />
+      <SidebarLink to="/orders" label="Orders" onClick={onClick} />
+      <SidebarLink to="/tasks" label="Tasks" onClick={onClick} />
+      <SidebarLink to="/calendar" label="Calendar" onClick={onClick} />
+      <SidebarLink to="/varieties" label="Varieties" onClick={onClick} />
+      <SidebarLink to="/customers" label="Customers" onClick={onClick} />
+      <SidebarLink
+        to="/production-sheet"
+        label="Production Sheet"
+        onClick={onClick}
+      />
+      <SidebarLink to="/settings" label="Settings" onClick={onClick} />
+    </nav>
+  );
+}
 
+/* ----------------- DESKTOP SIDEBAR ----------------- */
+function Sidebar() {
+  return (
+    <aside className="sidebar">
       <div className="sidebar-logo-block">
-        <img src={trayflowLogo} alt="TrayFlow Logo" className="sidebar-logo-image" />
+        <img
+          src={trayflowLogo}
+          alt="TrayFlow Logo"
+          className="sidebar-logo-image"
+        />
         <div className="sidebar-logo-text">
           <div className="sidebar-subtitle">MICROGREENS PRODUCTION PLANNER</div>
         </div>
       </div>
 
-      <nav className="sidebar-nav" onClick={onClose}>
-        <SidebarLink to="/" label="Dashboard" />
-        <SidebarLink to="/orders" label="Orders" />
-        <SidebarLink to="/tasks" label="Tasks" />
-        <SidebarLink to="/calendar" label="Calendar" />
-        <SidebarLink to="/varieties" label="Varieties" />
-        <SidebarLink to="/customers" label="Customers" />
-        <SidebarLink to="/production-sheet" label="Production Sheet" />
-        <SidebarLink to="/settings" label="Settings" />
-      </nav>
+      <AppNavLinks />
 
       <div className="sidebar-footer">
         <div>TrayFlow v1.0.0</div>
@@ -254,13 +305,25 @@ function Sidebar({
   );
 }
 
-function SidebarLink({ to, label }: { to: string; label: string }) {
+function SidebarLink({
+  to,
+  label,
+  onClick,
+}: {
+  to: string;
+  label: string;
+  onClick?: () => void;
+}) {
   return (
     <NavLink
       to={to}
       end={to === "/"}
+      onClick={onClick}
       className={({ isActive }) =>
-        ["sidebar-link", isActive ? "sidebar-link-active" : "sidebar-link-inactive"].join(" ")
+        [
+          "sidebar-link",
+          isActive ? "sidebar-link-active" : "sidebar-link-inactive",
+        ].join(" ")
       }
     >
       <span>{label}</span>
@@ -268,7 +331,101 @@ function SidebarLink({ to, label }: { to: string; label: string }) {
   );
 }
 
-function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
+/* ----------------- MOBILE DRAWER ----------------- */
+function MobileDrawer({
+  open,
+  onClose,
+}: {
+  open: boolean;
+  onClose: () => void;
+}) {
+  const location = useLocation();
+
+  // Close drawer on navigation
+  useEffect(() => {
+    if (open) onClose();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [location.pathname]);
+
+  if (!open) return null;
+
+  return (
+    <>
+      <div
+        onClick={onClose}
+        style={{
+          position: "fixed",
+          inset: 0,
+          background: "rgba(0,0,0,0.35)",
+          zIndex: 999,
+        }}
+      />
+      <div
+        style={{
+          position: "fixed",
+          top: 0,
+          left: 0,
+          height: "100%",
+          width: "85%",
+          maxWidth: 320,
+          background: "linear-gradient(180deg, #0b3b2c 0%, #0a2f34 100%)",
+          color: "white",
+          padding: 16,
+          zIndex: 1000,
+          overflowY: "auto",
+          boxSizing: "border-box",
+        }}
+      >
+        <div
+          style={{
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+          }}
+        >
+          <img
+            src={trayflowLogo}
+            alt="TrayFlow Logo"
+            style={{ width: 150, height: "auto" }}
+          />
+          <button
+            onClick={onClose}
+            style={{
+              padding: "10px 12px",
+              borderRadius: 10,
+              border: "1px solid rgba(255,255,255,0.25)",
+              background: "rgba(255,255,255,0.08)",
+              color: "white",
+              fontWeight: 800,
+              cursor: "pointer",
+            }}
+            aria-label="Close menu"
+          >
+            ✕
+          </button>
+        </div>
+
+        <div style={{ marginTop: 12 }}>
+          <AppNavLinks onClick={onClose} />
+        </div>
+
+        <div style={{ marginTop: 22, fontSize: 12, opacity: 0.85 }}>
+          <div>TrayFlow v1.0.0</div>
+          <div>© {new Date().getFullYear()} TrayFlow</div>
+        </div>
+      </div>
+    </>
+  );
+}
+
+/* ----------------- TOPBAR ----------------- */
+function TopBar({
+  onOpenMenu,
+  isMobile,
+}: {
+  onOpenMenu: () => void;
+  isMobile: boolean;
+}) {
   const location = useLocation();
   const navigate = useNavigate();
   const showNewTaskButton = location.pathname === "/tasks";
@@ -280,9 +437,11 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
       setEmail(data.user?.email ?? null);
     });
 
-    const { data: authListener } = supabase.auth.onAuthStateChange((_event, session) => {
-      setEmail(session?.user?.email ?? null);
-    });
+    const { data: authListener } = supabase.auth.onAuthStateChange(
+      (_event, session) => {
+        setEmail(session?.user?.email ?? null);
+      }
+    );
 
     return () => {
       authListener.subscription.unsubscribe();
@@ -290,28 +449,70 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   }, []);
 
   return (
-    <header className="topbar">
-      <div className="topbar-left">
-        <button className="topbar-menu" onClick={onOpenMenu} aria-label="Open menu">
+    <header
+      className="topbar"
+      style={
+        isMobile
+          ? {
+              justifyContent: "space-between",
+              padding: "12px 12px",
+              height: "auto",
+              minHeight: 56,
+            }
+          : undefined
+      }
+    >
+      {isMobile ? (
+        <button
+          onClick={onOpenMenu}
+          style={{
+            width: 44,
+            height: 44,
+            borderRadius: 12,
+            border: "1px solid rgba(0,0,0,0.15)",
+            background: "#fff",
+            fontSize: 18,
+            cursor: "pointer",
+          }}
+          aria-label="Open menu"
+        >
           ☰
         </button>
+      ) : (
+        <div style={{ width: 44 }} />
+      )}
+
+      <div className="topbar-center" style={isMobile ? { gap: 8 } : undefined}>
+        <img
+          src={trayflowIcon}
+          alt="TrayFlow Icon"
+          className="topbar-logo-image"
+        />
+        <span className="topbar-title">{isMobile ? "" : "TRAYFLOW"}</span>
       </div>
 
-      <div className="topbar-center">
-        <img src={trayflowIcon} alt="TrayFlow Icon" className="topbar-logo-image" />
-        <span className="topbar-title">TRAYFLOW</span>
-      </div>
-
-      <div className="topbar-right">
+      <div
+        className="topbar-right"
+        style={
+          isMobile ? { position: "static", right: "auto", gap: 8 } : undefined
+        }
+      >
         {showNewTaskButton && (
-          <button className="topbar-button" onClick={() => navigate("/tasks/new")}>
+          <button
+            className="topbar-button"
+            onClick={() => navigate("/tasks/new")}
+          >
             New Task
           </button>
         )}
 
         {email ? (
           <>
-            <span style={{ fontSize: 12, opacity: 0.6, marginRight: 8 }}>{email}</span>
+            {!isMobile && (
+              <span style={{ fontSize: 12, opacity: 0.6, marginRight: 8 }}>
+                {email}
+              </span>
+            )}
             <button
               className="topbar-button"
               onClick={async () => {
@@ -332,6 +533,7 @@ function TopBar({ onOpenMenu }: { onOpenMenu: () => void }) {
   );
 }
 
+/* ----------------- DO NOW PILL (Orders page uses this) ----------------- */
 type DoNowPillProps = {
   label: string;
   count: number;
@@ -341,7 +543,14 @@ type DoNowPillProps = {
   onClick: () => void;
 };
 
-function DoNowPill({ label, count, unit, isActive, variant = "default", onClick }: DoNowPillProps) {
+function DoNowPill({
+  label,
+  count,
+  unit,
+  isActive,
+  variant = "default",
+  onClick,
+}: DoNowPillProps) {
   const backgroundColor = isActive
     ? variant === "error"
       ? "#fee2e2"
@@ -376,20 +585,39 @@ function DoNowPill({ label, count, unit, isActive, variant = "default", onClick 
         transform: isActive ? "translateY(-2px)" : "none",
       }}
     >
-      <span style={{ fontSize: "14px", color: textColor, opacity: 0.9, marginBottom: "4px" }}>
+      <span
+        style={{
+          fontSize: "14px",
+          color: textColor,
+          opacity: 0.9,
+          marginBottom: "4px",
+        }}
+      >
         {label}
       </span>
-      <span style={{ fontSize: "24px", fontWeight: 700, color: textColor, lineHeight: 1.2 }}>
+      <span
+        style={{
+          fontSize: "24px",
+          fontWeight: 700,
+          color: textColor,
+          lineHeight: 1.2,
+        }}
+      >
         {count}
       </span>
-      <span style={{ fontSize: "12px", color: textColor, opacity: 0.8 }}>{unit}</span>
+      <span style={{ fontSize: "12px", color: textColor, opacity: 0.8 }}>
+        {unit}
+      </span>
     </button>
   );
 }
 
 /* ----------------- ORDERS PAGE ----------------- */
 async function updateOrderStatusRow(orderId: string, status: OrderStatus) {
-  const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+  const { error } = await supabase
+    .from("orders")
+    .update({ status })
+    .eq("id", orderId);
   if (error) throw new Error(error.message);
 }
 
@@ -403,9 +631,9 @@ function OrdersPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [doNowFilter, setDoNowFilter] = useState<"none" | "sow" | "harvest" | "deliver" | "overdue">(
-    "none"
-  );
+  const [doNowFilter, setDoNowFilter] = useState<
+    "none" | "sow" | "harvest" | "deliver" | "overdue"
+  >("none");
 
   const todayYMD = toYMD(new Date());
   const groups = useMemo(() => buildOrderGroups(orders), [orders]);
@@ -423,7 +651,6 @@ function OrdersPage() {
           getCustomersSB(),
           fetchVarietiesForOrders(),
         ]);
-
         if (!alive) return;
         setOrders(os);
         setCustomers(cs);
@@ -442,15 +669,20 @@ function OrdersPage() {
     };
   }, [location.key]);
 
-  const customerName = (id: string) => customers.find((c) => c.id === id)?.name ?? "Unknown customer";
-  const varietyName = (id: string) => varieties.find((v) => v.id === id)?.name ?? "Unknown variety";
-  const varietyGrowDays = (id: string) => Number(varieties.find((v) => v.id === id)?.daysToHarvest ?? 0);
+  const customerName = (id: string) =>
+    customers.find((c) => c.id === id)?.name ?? "Unknown customer";
+  const varietyName = (id: string) =>
+    varieties.find((v) => v.id === id)?.name ?? "Unknown variety";
+  const varietyGrowDays = (id: string) =>
+    Number(varieties.find((v) => v.id === id)?.daysToHarvest ?? 0);
 
   async function updateGroupStatus(g: OrderGroup, status: OrderStatus) {
+    // ✅ IMPORTANT FIX:
+    // Only update the specific lines in this group, not "all orders with same customer + delivery date"
+    const ids = new Set(g.lines.map((x) => x.id));
+
     setOrders((prev) =>
-      prev.map((o) =>
-        o.customerId === g.customerId && o.deliveryDate === g.deliveryDate ? { ...o, status } : o
-      )
+      prev.map((o) => (ids.has(o.id) ? { ...o, status } : o))
     );
 
     await Promise.all(g.lines.map((line) => updateOrderStatusRow(line.id, status)));
@@ -474,7 +706,13 @@ function OrdersPage() {
     color: "white",
   };
 
-  const { sowTodayTrays, harvestTodayTrays, deliverTodayCount, overdueCount, filteredGroups } = useMemo(() => {
+  const {
+    sowTodayTrays,
+    harvestTodayTrays,
+    deliverTodayCount,
+    overdueCount,
+    filteredGroups,
+  } = useMemo(() => {
     let sowToday = 0;
     let harvestToday = 0;
     let deliverToday = 0;
@@ -486,7 +724,8 @@ function OrdersPage() {
       const deliveryDate = group.deliveryDate;
       const harvestDate = deliveryDate ? subtractDaysYMD(deliveryDate, 1) : null;
 
-      const isDelivered = group.status === "delivered";
+      const status = normalizeStatus(group.status);
+      const isDelivered = status === "delivered";
       let matchesFilter = false;
 
       if (deliveryDate && deliveryDate < todayYMD && !isDelivered) {
@@ -500,7 +739,10 @@ function OrdersPage() {
       }
 
       if (harvestDate === todayYMD && !isDelivered) {
-        const groupTrays = group.lines.reduce((sum, line) => sum + Number(line.quantity ?? 0), 0);
+        const groupTrays = group.lines.reduce(
+          (sum, line) => sum + Number(line.quantity ?? 0),
+          0
+        );
         harvestToday += groupTrays;
         if (doNowFilter === "harvest") matchesFilter = true;
       }
@@ -555,7 +797,9 @@ function OrdersPage() {
             gap: 12,
           }}
         >
-          <h3 style={{ margin: 0, fontSize: "16px", color: "#0f172a" }}>Today’s Do Now</h3>
+          <h3 style={{ margin: 0, fontSize: "16px", color: "#0f172a" }}>
+            Today’s Do Now
+          </h3>
 
           {doNowFilter !== "none" && (
             <button
@@ -588,14 +832,18 @@ function OrdersPage() {
             count={harvestTodayTrays}
             unit="trays"
             isActive={doNowFilter === "harvest"}
-            onClick={() => setDoNowFilter(doNowFilter === "harvest" ? "none" : "harvest")}
+            onClick={() =>
+              setDoNowFilter(doNowFilter === "harvest" ? "none" : "harvest")
+            }
           />
           <DoNowPill
             label="Deliver today"
             count={deliverTodayCount}
             unit="orders"
             isActive={doNowFilter === "deliver"}
-            onClick={() => setDoNowFilter(doNowFilter === "deliver" ? "none" : "deliver")}
+            onClick={() =>
+              setDoNowFilter(doNowFilter === "deliver" ? "none" : "deliver")
+            }
           />
           <DoNowPill
             label="Overdue"
@@ -603,7 +851,9 @@ function OrdersPage() {
             unit="orders"
             isActive={doNowFilter === "overdue"}
             variant={overdueCount > 0 ? "error" : "default"}
-            onClick={() => setDoNowFilter(doNowFilter === "overdue" ? "none" : "overdue")}
+            onClick={() =>
+              setDoNowFilter(doNowFilter === "overdue" ? "none" : "overdue")
+            }
           />
         </div>
       </div>
@@ -632,7 +882,10 @@ function OrdersPage() {
       {!loading && !error && filteredGroups.length > 0 ? (
         <div style={{ marginTop: "0.5rem" }}>
           {filteredGroups.map((g) => {
-            const totalTrays = g.lines.reduce((sum, x) => sum + Number(x.quantity ?? 0), 0);
+            const totalTrays = g.lines.reduce(
+              (sum, x) => sum + Number(x.quantity ?? 0),
+              0
+            );
 
             const breakdown = new Map<string, number>();
             for (const line of g.lines) {
@@ -643,7 +896,11 @@ function OrdersPage() {
             }
 
             const breakdownList = Array.from(breakdown.entries())
-              .map(([varietyId, qty]) => ({ varietyId, qty, name: varietyName(varietyId) }))
+              .map(([varietyId, qty]) => ({
+                varietyId,
+                qty,
+                name: varietyName(varietyId),
+              }))
               .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
 
             let earliestSow: string | null = null;
@@ -656,6 +913,9 @@ function OrdersPage() {
             }
 
             const num = displayOrderNumber(g.key);
+
+            // ✅ NORMALIZE STATUS HERE so buttons are correct even if DB stored "Delivered"
+            const status = normalizeStatus(g.status);
 
             return (
               <div
@@ -679,27 +939,49 @@ function OrdersPage() {
                   }}
                 >
                   <div style={{ minWidth: 0 }}>
-                    <div style={{ fontWeight: 900, fontSize: 16, color: "#0f172a" }}>
+                    <div
+                      style={{ fontWeight: 900, fontSize: 16, color: "#0f172a" }}
+                    >
                       {customerName(g.customerId)}
                     </div>
-                    <div style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}>
-                      <strong>{num}</strong> • Delivery {formatDisplayDate(g.deliveryDate)} (
-                      {ymdToDow(g.deliveryDate)})
+                    <div
+                      style={{ fontSize: 12, color: "#64748b", marginTop: 2 }}
+                    >
+                      <strong>{num}</strong> • Delivery{" "}
+                      {formatDisplayDate(g.deliveryDate)} ({ymdToDow(g.deliveryDate)})
                     </div>
 
-                    <div style={{ marginTop: 10, display: "flex", gap: 8, flexWrap: "wrap" }}>
-                      <button style={smallBtn} onClick={() => navigate(`/orders/${encodeURIComponent(g.key)}`)}>
+                    <div
+                      style={{
+                        marginTop: 10,
+                        display: "flex",
+                        gap: 8,
+                        flexWrap: "wrap",
+                      }}
+                    >
+                      <button
+                        style={smallBtn}
+                        onClick={() =>
+                          navigate(`/orders/${encodeURIComponent(g.key)}`)
+                        }
+                      >
                         View
                       </button>
 
-                      {g.status !== "packed" && g.status !== "delivered" && (
-                        <button style={smallBtn} onClick={() => updateGroupStatus(g, "packed")}>
+                      {status !== "packed" && status !== "delivered" && (
+                        <button
+                          style={smallBtn}
+                          onClick={() => updateGroupStatus(g, "packed")}
+                        >
                           Mark Packed
                         </button>
                       )}
 
-                      {g.status !== "delivered" && (
-                        <button style={smallBtnPrimary} onClick={() => updateGroupStatus(g, "delivered")}>
+                      {status !== "delivered" && (
+                        <button
+                          style={smallBtnPrimary}
+                          onClick={() => updateGroupStatus(g, "delivered")}
+                        >
                           Mark Delivered
                         </button>
                       )}
@@ -718,7 +1000,7 @@ function OrdersPage() {
                       height: "fit-content",
                     }}
                   >
-                    {g.status}
+                    {status}
                   </span>
                 </div>
 
@@ -766,11 +1048,16 @@ function OrdersPage() {
                 </div>
 
                 <div style={{ marginTop: 10, fontSize: 13, color: "#0f172a" }}>
-                  <div style={{ fontWeight: 900, marginBottom: 6 }}>Variety breakdown</div>
+                  <div style={{ fontWeight: 900, marginBottom: 6 }}>
+                    Variety breakdown
+                  </div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                     {breakdownList.map((b) => {
                       const days = varietyGrowDays(b.varietyId);
-                      const sow = days > 0 && g.deliveryDate ? subtractDaysYMD(g.deliveryDate, days) : null;
+                      const sow =
+                        days > 0 && g.deliveryDate
+                          ? subtractDaysYMD(g.deliveryDate, days)
+                          : null;
 
                       return (
                         <div
@@ -786,7 +1073,13 @@ function OrdersPage() {
                           <div style={{ fontWeight: 800 }}>
                             {b.qty} × {b.name}
                           </div>
-                          <div style={{ fontSize: 12, color: "#64748b", whiteSpace: "nowrap" }}>
+                          <div
+                            style={{
+                              fontSize: 12,
+                              color: "#64748b",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
                             {sow ? `Sow ${formatDisplayDate(sow)} (${days}d)` : "—"}
                           </div>
                         </div>
@@ -803,7 +1096,7 @@ function OrdersPage() {
   );
 }
 
-/* ----------------- NEW ORDER PAGE ----------------- */
+/* ----------------- NEW ORDER PAGE (RESTORED) ----------------- */
 type OrderLineDraft = {
   id: string;
   varietyId: string;
@@ -830,7 +1123,10 @@ function NewOrderPage() {
   const [submitting, setSubmitting] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  const activeCustomers = useMemo(() => customers.filter((c) => c.active !== false), [customers]);
+  const activeCustomers = useMemo(
+    () => customers.filter((c) => c.active !== false),
+    [customers]
+  );
 
   const makeId = () =>
     typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -843,12 +1139,20 @@ function NewOrderPage() {
       const seed = seedFromFirst ? prev[0]?.seedGramsPerTray : undefined;
       return [
         ...prev,
-        { id: makeId(), varietyId: firstVar, quantity: 1, seedGramsPerTray: seed, packSize: "", notes: "" },
+        {
+          id: makeId(),
+          varietyId: firstVar,
+          quantity: 1,
+          seedGramsPerTray: seed,
+          packSize: "",
+          notes: "",
+        },
       ];
     });
   };
 
-  const removeLine = (id: string) => setLines((prev) => prev.filter((l) => l.id !== id));
+  const removeLine = (id: string) =>
+    setLines((prev) => prev.filter((l) => l.id !== id));
   const updateLine = (id: string, patch: Partial<OrderLineDraft>) =>
     setLines((prev) => prev.map((l) => (l.id === id ? { ...l, ...patch } : l)));
 
@@ -858,7 +1162,10 @@ function NewOrderPage() {
     (async () => {
       try {
         setLoading(true);
-        const [cs, vs] = await Promise.all([getCustomersSB(), fetchVarietiesForOrders()]);
+        const [cs, vs] = await Promise.all([
+          getCustomersSB(),
+          fetchVarietiesForOrders(),
+        ]);
         if (!alive) return;
 
         setCustomers(cs);
@@ -871,7 +1178,16 @@ function NewOrderPage() {
         setSowDate(today);
         setDeliveryDate(addDaysYMD(today, 2));
 
-        setLines([{ id: makeId(), varietyId: vs[0]?.id ?? "", quantity: 1, seedGramsPerTray: undefined, packSize: "", notes: "" }]);
+        setLines([
+          {
+            id: makeId(),
+            varietyId: vs[0]?.id ?? "",
+            quantity: 1,
+            seedGramsPerTray: undefined,
+            packSize: "",
+            notes: "",
+          },
+        ]);
       } catch (e: any) {
         alert(e?.message ?? "Failed to load customers/varieties.");
       } finally {
@@ -895,14 +1211,19 @@ function NewOrderPage() {
 
       if (planMode === "delivery") {
         computedDelivery = deliveryDate;
-        computedSow = deliveryDate && growDays > 0 ? subtractDaysYMD(deliveryDate, growDays) : sowDate;
+        computedSow =
+          deliveryDate && growDays > 0
+            ? subtractDaysYMD(deliveryDate, growDays)
+            : sowDate;
       } else {
         computedSow = sowDate;
-        computedDelivery = sowDate && growDays > 0 ? addDaysYMD(sowDate, growDays) : deliveryDate;
+        computedDelivery =
+          sowDate && growDays > 0 ? addDaysYMD(sowDate, growDays) : deliveryDate;
       }
 
       const gramsPerTray = Number(l.seedGramsPerTray ?? 0);
-      const totalGrams = gramsPerTray > 0 ? gramsPerTray * Number(l.quantity ?? 0) : 0;
+      const totalGrams =
+        gramsPerTray > 0 ? gramsPerTray * Number(l.quantity ?? 0) : 0;
 
       return {
         line: l,
@@ -918,7 +1239,10 @@ function NewOrderPage() {
     const orderDelivery = result.find((x) => x.delivery)?.delivery ?? deliveryDate;
     const orderSow = result.find((x) => x.sow)?.sow ?? sowDate;
 
-    const totalTrays = result.reduce((sum, x) => sum + Number(x.line.quantity ?? 0), 0);
+    const totalTrays = result.reduce(
+      (sum, x) => sum + Number(x.line.quantity ?? 0),
+      0
+    );
     const totalSeed = result.reduce((sum, x) => sum + Number(x.totalGrams ?? 0), 0);
 
     return { lines: result, orderDelivery, orderSow, totalTrays, totalSeed };
@@ -937,17 +1261,18 @@ function NewOrderPage() {
     e.preventDefault();
 
     if (!customerId) return alert("Please select a customer.");
-    if (!lines.length) return alert("Add at least one variety line.");
+    if (!lines.length) return alert("Add at least one variety.");
 
     for (const l of lines) {
-      if (!l.varietyId) return alert("Each line needs a variety selected.");
-      if (!l.quantity || l.quantity <= 0) return alert("Each line needs trays > 0.");
+      if (!l.varietyId) return alert("Each variety row needs a variety selected.");
+      if (!l.quantity || l.quantity <= 0) return alert("Each row needs trays > 0.");
     }
 
     const baseDelivery = computed.orderDelivery;
     const baseSow = computed.orderSow;
 
-    if (planMode === "delivery" && !baseDelivery) return alert("Please select a delivery date.");
+    if (planMode === "delivery" && !baseDelivery)
+      return alert("Please select a delivery date.");
     if (planMode === "sow" && !baseSow) return alert("Please select a sow date.");
 
     setSubmitting(true);
@@ -970,19 +1295,246 @@ function NewOrderPage() {
     }
   };
 
+  if (loading) {
+    return (
+      <div className="page">
+        <h1 className="page-title">New Order</h1>
+        <p className="page-text">Loading…</p>
+      </div>
+    );
+  }
+
   return (
     <div className="page">
       <h1 className="page-title">New Order</h1>
 
-      {/* NOTE: You had this placeholder in the version you pasted.
-          If your real project has the full New Order UI, paste it back here. */}
-      <p className="page-text">
-        Your New Order page code is unchanged — keep your existing JSX here.
-      </p>
+      <form onSubmit={handleSubmit} style={{ marginTop: 16 }}>
+        {/* Header controls */}
+        <div style={{ display: "grid", gridTemplateColumns: "1.2fr 1fr 1fr", gap: 12 }}>
+          <div>
+            <div style={miniLabel}>Customer</div>
+            <select value={customerId} onChange={(e) => setCustomerId(e.target.value)} style={controlStyle}>
+              {activeCustomers.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+          </div>
 
-      <button onClick={() => navigate("/orders")} style={secondaryBtn}>
-        Back
-      </button>
+          <div>
+            <div style={miniLabel}>Status</div>
+            <select value={status} onChange={(e) => setStatus(e.target.value as OrderStatus)} style={controlStyle}>
+              <option value="draft">draft</option>
+              <option value="confirmed">confirmed</option>
+              <option value="packed">packed</option>
+              <option value="delivered">delivered</option>
+            </select>
+            <div style={{ fontSize: 12, opacity: 0.65, marginTop: 6 }}>{statusHelp}</div>
+          </div>
+
+          <div>
+            <div style={miniLabel}>Plan mode</div>
+            <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+              <button
+                type="button"
+                style={{
+                  ...secondaryBtn,
+                  borderColor: planMode === "delivery" ? "#047857" : "#cbd5f5",
+                  fontWeight: 900,
+                }}
+                onClick={() => setPlanMode("delivery")}
+              >
+                Plan by delivery date
+              </button>
+              <button
+                type="button"
+                style={{
+                  ...secondaryBtn,
+                  borderColor: planMode === "sow" ? "#047857" : "#cbd5f5",
+                  fontWeight: 900,
+                }}
+                onClick={() => setPlanMode("sow")}
+              >
+                Plan by sow date
+              </button>
+            </div>
+          </div>
+        </div>
+
+        {/* Date inputs */}
+        <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12, marginTop: 14 }}>
+          <div>
+            <div style={miniLabel}>Delivery date</div>
+            <input
+              type="date"
+              value={deliveryDate}
+              onChange={(e) => setDeliveryDate(e.target.value)}
+              style={controlStyle}
+              disabled={planMode !== "delivery"}
+            />
+          </div>
+
+          <div>
+            <div style={miniLabel}>Sow date</div>
+            <input
+              type="date"
+              value={sowDate}
+              onChange={(e) => setSowDate(e.target.value)}
+              style={controlStyle}
+              disabled={planMode !== "sow"}
+            />
+          </div>
+        </div>
+
+        {/* Summary */}
+        <div
+          style={{
+            marginTop: 14,
+            padding: 12,
+            borderRadius: 12,
+            border: "1px solid #e2e8f0",
+            background: "#fff",
+            display: "flex",
+            gap: 16,
+            flexWrap: "wrap",
+            alignItems: "center",
+          }}
+        >
+          <div style={{ fontWeight: 900 }}>Totals</div>
+          <div style={{ fontSize: 13, opacity: 0.8 }}>
+            Trays: <strong>{computed.totalTrays}</strong>
+          </div>
+          <div style={{ fontSize: 13, opacity: 0.8 }}>
+            Seed: <strong>{computed.totalSeed ? `${computed.totalSeed} g` : "—"}</strong>
+          </div>
+          <div style={{ fontSize: 13, opacity: 0.8 }}>
+            Order sow: <strong>{computed.orderSow ? formatDisplayDate(computed.orderSow) : "—"}</strong>
+          </div>
+          <div style={{ fontSize: 13, opacity: 0.8 }}>
+            Order delivery: <strong>{computed.orderDelivery ? formatDisplayDate(computed.orderDelivery) : "—"}</strong>
+          </div>
+        </div>
+
+        {/* Lines */}
+        <div style={{ marginTop: 16, display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12 }}>
+          <div style={{ fontWeight: 900, fontSize: 16 }}>Varieties</div>
+          <button type="button" onClick={() => addLine(true)} style={secondaryBtn}>
+            + Add variety
+          </button>
+        </div>
+
+        <div style={{ marginTop: 10, display: "grid", gap: 10 }}>
+          {computed.lines.map((c) => (
+            <div
+              key={c.line.id}
+              style={{
+                border: "1px solid #e2e8f0",
+                borderRadius: 14,
+                padding: 12,
+                background: "#fff",
+              }}
+            >
+              <div style={{ display: "grid", gridTemplateColumns: "1.4fr 110px 150px", gap: 10, alignItems: "end" }}>
+                <div>
+                  <div style={miniLabel}>Variety</div>
+                  <select
+                    value={c.line.varietyId}
+                    onChange={(e) => updateLine(c.line.id, { varietyId: e.target.value })}
+                    style={controlStyle}
+                  >
+                    {varieties.map((v) => (
+                      <option key={v.id} value={v.id}>
+                        {v.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <div style={miniLabel}>Trays</div>
+                  <input
+                    type="number"
+                    min={1}
+                    value={c.line.quantity}
+                    onChange={(e) => updateLine(c.line.id, { quantity: Number(e.target.value) })}
+                    style={controlStyle}
+                  />
+                </div>
+
+                <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
+                  <button type="button" onClick={() => removeLine(c.line.id)} style={secondaryBtn}>
+                    Remove
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 10 }}>
+                <div>
+                  <div style={miniLabel}>Seed g / tray</div>
+                  <input
+                    type="number"
+                    min={0}
+                    value={c.line.seedGramsPerTray ?? ""}
+                    onChange={(e) =>
+                      updateLine(c.line.id, {
+                        seedGramsPerTray: e.target.value === "" ? undefined : Number(e.target.value),
+                      })
+                    }
+                    style={controlStyle}
+                    placeholder="optional"
+                  />
+                </div>
+
+                <div>
+                  <div style={miniLabel}>Pack size</div>
+                  <input
+                    value={c.line.packSize ?? ""}
+                    onChange={(e) => updateLine(c.line.id, { packSize: e.target.value })}
+                    style={controlStyle}
+                    placeholder="optional"
+                  />
+                </div>
+
+                <div>
+                  <div style={miniLabel}>Notes</div>
+                  <input
+                    value={c.line.notes ?? ""}
+                    onChange={(e) => updateLine(c.line.id, { notes: e.target.value })}
+                    style={controlStyle}
+                    placeholder="optional"
+                  />
+                </div>
+              </div>
+
+              <div style={{ marginTop: 10, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#f1f5f9" }}>
+                  Grow: <strong>{c.growDays ? `${c.growDays} days` : "—"}</strong>
+                </span>
+                <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#eff6ff" }}>
+                  Sow: <strong>{c.sow ? formatDisplayDate(c.sow) : "—"}</strong>
+                </span>
+                <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#ecfdf5" }}>
+                  Deliver: <strong>{c.delivery ? formatDisplayDate(c.delivery) : "—"}</strong>
+                </span>
+                <span style={{ fontSize: 12, padding: "2px 10px", borderRadius: 999, background: "#fff7ed" }}>
+                  Seed total: <strong>{c.totalGrams ? `${c.totalGrams} g` : "—"}</strong>
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        {/* Actions */}
+        <div style={{ display: "flex", gap: 10, marginTop: 16 }}>
+          <button type="submit" style={primaryBtn} disabled={submitting}>
+            {submitting ? "Saving…" : "Save Order"}
+          </button>
+          <button type="button" onClick={() => navigate("/orders")} style={secondaryBtn}>
+            Cancel
+          </button>
+        </div>
+      </form>
     </div>
   );
 }
@@ -999,33 +1551,23 @@ function SettingsPage() {
 /* ----------------- APP SHELL ----------------- */
 function AppShell() {
   const location = useLocation();
-
-  // Mobile menu state
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  useEffect(() => {
-    // close menu on route change
-    setMenuOpen(false);
-  }, [location.pathname]);
+  const isMobile = useIsMobile();
+  const [drawerOpen, setDrawerOpen] = useState(false);
 
   // On /login we don't want to show the whole app chrome.
   const isLogin = location.pathname === "/login";
-
-  if (isLogin) {
-    return <LoginGate />;
-  }
+  if (isLogin) return <LoginGate />;
 
   return (
     <RequireAuth>
       <div className="app-shell">
-        <Sidebar isOpen={menuOpen} onClose={() => setMenuOpen(false)} />
-
-        {menuOpen && (
-          <div className="sidebar-overlay" onClick={() => setMenuOpen(false)} />
+        {!isMobile && <Sidebar />}
+        {isMobile && (
+          <MobileDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
         )}
 
         <div className="app-main">
-          <TopBar onOpenMenu={() => setMenuOpen(true)} />
+          <TopBar isMobile={isMobile} onOpenMenu={() => setDrawerOpen(true)} />
           <main className="app-main-content">
             <Routes>
               <Route path="/" element={<DashboardPage />} />
@@ -1042,6 +1584,7 @@ function AppShell() {
               <Route path="/customers" element={<CustomersPage />} />
               <Route path="/production-sheet" element={<ProductionSheetPage />} />
               <Route path="/settings" element={<SettingsPage />} />
+
               <Route path="*" element={<Navigate to="/" replace />} />
             </Routes>
           </main>
@@ -1077,7 +1620,9 @@ function LoginGate() {
 
   if (checking) {
     return (
-      <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
+      <div
+        style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}
+      >
         <div style={{ opacity: 0.7, fontWeight: 700 }}>Loading…</div>
       </div>
     );
