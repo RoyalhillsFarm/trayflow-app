@@ -1,8 +1,10 @@
 // src/pages/OrderDetailPage.tsx
-import { useEffect, useMemo, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import React, { useEffect, useMemo, useState } from "react";
+import { useLocation, useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../utils/supabaseClient";
 import { formatDisplayDate } from "../utils/formatDate";
+
+import type { Variety } from "../lib/storage";
 import {
   getOrders as getOrdersSB,
   getCustomers as getCustomersSB,
@@ -11,8 +13,10 @@ import {
   type OrderStatus,
 } from "../lib/supabaseStorage";
 
-type Variety = { id: string; name: string; daysToHarvest: number };
-
+/* -----------------------------
+   SAME GROUPING LOGIC AS App.tsx
+   (so "View" works consistently)
+------------------------------ */
 const GROUP_BUCKET_MINUTES = 5;
 
 function parseCreatedAtToMs(created_at?: string | null): number {
@@ -25,6 +29,20 @@ function groupKeyForLine(o: Order): string {
   const ms = parseCreatedAtToMs((o as any).created_at);
   const bucket = ms ? Math.floor(ms / (GROUP_BUCKET_MINUTES * 60 * 1000)) : 0;
   return `${o.customerId}__${o.deliveryDate}__${bucket}`;
+}
+
+function stableShortHash(str: string): string {
+  let h = 2166136261;
+  for (let i = 0; i < str.length; i++) {
+    h ^= str.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  const x = (h >>> 0).toString(36).toUpperCase();
+  return x.slice(0, 6).padStart(6, "0");
+}
+
+function displayOrderNumber(groupKey: string): string {
+  return `TF-${stableShortHash(groupKey)}`;
 }
 
 type OrderGroup = {
@@ -49,7 +67,7 @@ function buildOrderGroups(orders: Order[]): OrderGroup[] {
         key: k,
         customerId: o.customerId,
         deliveryDate: o.deliveryDate,
-        status: (String(o.status ?? "").toLowerCase() as OrderStatus) || "confirmed",
+        status: o.status,
         createdAtMs: ms,
         lines: [o],
       });
@@ -57,20 +75,19 @@ function buildOrderGroups(orders: Order[]): OrderGroup[] {
       existing.lines.push(o);
       existing.createdAtMs = Math.min(existing.createdAtMs || ms, ms || existing.createdAtMs);
 
-      // pick a “worst-case” status across lines
-      const statuses = new Set(existing.lines.map((x) => String(x.status ?? "").toLowerCase()));
-      existing.status = (statuses.has("draft")
+      // overall group status (draft > confirmed > packed > delivered)
+      const statuses = new Set(existing.lines.map((x) => x.status));
+      existing.status = statuses.has("draft")
         ? "draft"
         : statuses.has("confirmed")
         ? "confirmed"
         : statuses.has("packed")
         ? "packed"
-        : "delivered") as OrderStatus;
+        : "delivered";
     }
   }
 
   const groups = Array.from(map.values());
-
   for (const g of groups) {
     g.lines.sort((a, b) => {
       const am = parseCreatedAtToMs((a as any).created_at);
@@ -80,10 +97,19 @@ function buildOrderGroups(orders: Order[]): OrderGroup[] {
     });
   }
 
+  groups.sort((a, b) => {
+    const d = b.deliveryDate.localeCompare(a.deliveryDate);
+    if (d !== 0) return d;
+    return (b.createdAtMs || 0) - (a.createdAtMs || 0);
+  });
+
   return groups;
 }
 
-async function fetchVarieties(): Promise<Variety[]> {
+/* -----------------------------
+   Fetch varieties (for names)
+------------------------------ */
+async function fetchVarietiesForOrders(): Promise<Variety[]> {
   const { data, error } = await supabase
     .from("varieties")
     .select("id, variety, harvest_days")
@@ -98,16 +124,33 @@ async function fetchVarieties(): Promise<Variety[]> {
   }));
 }
 
+/* -----------------------------
+   Update status for each line
+------------------------------ */
+async function updateOrderStatusRow(orderId: string, status: OrderStatus) {
+  const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+  if (error) throw new Error(error.message);
+}
+
 export default function OrderDetailPage() {
   const { groupKey } = useParams();
   const navigate = useNavigate();
+  const location = useLocation();
 
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const decodedGroupKey = useMemo(() => {
+    try {
+      return decodeURIComponent(groupKey ?? "");
+    } catch {
+      return groupKey ?? "";
+    }
+  }, [groupKey]);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [varieties, setVarieties] = useState<Variety[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     let alive = true;
@@ -117,9 +160,13 @@ export default function OrderDetailPage() {
         setLoading(true);
         setError(null);
 
-        const [os, cs, vs] = await Promise.all([getOrdersSB(), getCustomersSB(), fetchVarieties()]);
-        if (!alive) return;
+        const [os, cs, vs] = await Promise.all([
+          getOrdersSB(),
+          getCustomersSB(),
+          fetchVarietiesForOrders(),
+        ]);
 
+        if (!alive) return;
         setOrders(os);
         setCustomers(cs);
         setVarieties(vs);
@@ -135,28 +182,62 @@ export default function OrderDetailPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [location.key]);
 
-  const customerName = (id: string) => customers.find((c) => c.id === id)?.name ?? "Unknown customer";
-  const varietyName = (id: string) => varieties.find((v) => v.id === id)?.name ?? "Unknown variety";
+  const groups = useMemo(() => buildOrderGroups(orders), [orders]);
 
-  const resolvedGroup = useMemo(() => {
-    if (!groupKey) return null;
+  const group = useMemo(() => {
+    if (!decodedGroupKey) return null;
+    return groups.find((g) => g.key === decodedGroupKey) ?? null;
+  }, [groups, decodedGroupKey]);
 
-    const groups = buildOrderGroups(orders);
-    const foundByGroupKey = groups.find((g) => g.key === groupKey);
-    if (foundByGroupKey) return foundByGroupKey;
+  const customerName = (id: string) =>
+    customers.find((c) => c.id === id)?.name ?? "Unknown customer";
 
-    // Fallback: if someone opened /orders/<orderId> from an old link, try by id:
-    const maybeOrder = orders.find((o) => o.id === groupKey);
-    if (maybeOrder) {
-      const key = groupKeyForLine(maybeOrder);
-      const rebuilt = buildOrderGroups(orders).find((g) => g.key === key);
-      return rebuilt ?? null;
+  const varietyName = (id: string) =>
+    varieties.find((v) => v.id === id)?.name ?? "Unknown variety";
+
+  const varietyGrowDays = (id: string) =>
+    Number(varieties.find((v) => v.id === id)?.daysToHarvest ?? 0);
+
+  const breakdown = useMemo(() => {
+    if (!group) return [];
+    const map = new Map<string, number>();
+    for (const line of group.lines) {
+      map.set(line.varietyId, (map.get(line.varietyId) ?? 0) + Number(line.quantity ?? 0));
     }
+    return Array.from(map.entries())
+      .map(([varietyId, qty]) => ({
+        varietyId,
+        qty,
+        name: varietyName(varietyId),
+        growDays: varietyGrowDays(varietyId),
+      }))
+      .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+  }, [group, varieties]);
 
-    return null;
-  }, [groupKey, orders]);
+  const totalTrays = useMemo(() => {
+    if (!group) return 0;
+    return group.lines.reduce((sum, x) => sum + Number(x.quantity ?? 0), 0);
+  }, [group]);
+
+  async function setGroupStatus(status: OrderStatus) {
+    if (!group) return;
+    setBusy(true);
+    try {
+      await Promise.all(group.lines.map((l) => updateOrderStatusRow(l.id, status)));
+
+      // refresh local state so buttons/status update immediately
+      setOrders((prev) => prev.map((o) => {
+        const sameLine = group.lines.some((l) => l.id === o.id);
+        return sameLine ? { ...o, status } : o;
+      }));
+    } catch (e: any) {
+      alert(e?.message ?? "Failed to update order status.");
+    } finally {
+      setBusy(false);
+    }
+  }
 
   if (loading) {
     return (
@@ -171,56 +252,73 @@ export default function OrderDetailPage() {
     return (
       <div className="page">
         <h1 className="page-title">Order</h1>
-        <p className="page-text" style={{ color: "#b91c1c" }}>
-          {error}
-        </p>
-        <button className="topbar-button" onClick={() => navigate("/orders")}>
+        <p className="page-text" style={{ color: "#b91c1c" }}>{error}</p>
+        <button className="btn-secondary" onClick={() => navigate("/orders")}>
           Back to Orders
         </button>
       </div>
     );
   }
 
-  if (!resolvedGroup) {
+  if (!group) {
     return (
       <div className="page">
         <h1 className="page-title">Order</h1>
         <p className="page-text" style={{ color: "#b91c1c" }}>
           Order not found.
         </p>
-        <p className="page-text">
-          This usually happens if the link points to an older order format. You can still access your orders from the Orders page.
-        </p>
-        <button className="topbar-button" onClick={() => navigate("/orders")}>
+        <button className="btn-secondary" onClick={() => navigate("/orders")}>
           Back to Orders
         </button>
       </div>
     );
   }
 
-  const totalTrays = resolvedGroup.lines.reduce((sum, o) => sum + Number(o.quantity ?? 0), 0);
-  const status = String(resolvedGroup.status ?? "").toLowerCase();
-
-  // Group by variety
-  const breakdown = new Map<string, number>();
-  for (const line of resolvedGroup.lines) {
-    breakdown.set(line.varietyId, (breakdown.get(line.varietyId) ?? 0) + Number(line.quantity ?? 0));
-  }
-
-  const breakdownList = Array.from(breakdown.entries())
-    .map(([varietyId, qty]) => ({ varietyId, qty, name: varietyName(varietyId) }))
-    .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
+  const orderNum = displayOrderNumber(group.key);
 
   return (
     <div className="page">
       <h1 className="page-title">Order</h1>
-      <p className="page-text" style={{ marginTop: 8 }}>
-        <strong>{customerName(resolvedGroup.customerId)}</strong> • Delivery {formatDisplayDate(resolvedGroup.deliveryDate)} • Total trays:{" "}
-        <strong>{totalTrays}</strong> • Status: <strong style={{ textTransform: "capitalize" }}>{status}</strong>
-      </p>
 
-      <div style={{ marginTop: 16 }}>
-        <div style={{ fontWeight: 900, marginBottom: 8 }}>Variety breakdown</div>
+      <div className="page-text" style={{ marginTop: 6 }}>
+        <strong>{customerName(group.customerId)}</strong>
+        {" • "}
+        Delivery {formatDisplayDate(group.deliveryDate)}
+        {" • "}
+        Total trays: <strong>{totalTrays}</strong>
+        {" • "}
+        Status: <strong style={{ textTransform: "capitalize" }}>{group.status}</strong>
+        {" • "}
+        <span style={{ opacity: 0.7 }}>{orderNum}</span>
+      </div>
+
+      {/* Actions (NO edit/delete) */}
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap" }}>
+        {group.status !== "packed" && group.status !== "delivered" && (
+          <button
+            className="btn-secondary"
+            onClick={() => setGroupStatus("packed")}
+            disabled={busy}
+          >
+            Mark Packed
+          </button>
+        )}
+
+        {group.status !== "delivered" && (
+          <button
+            className="btn-primary"
+            onClick={() => setGroupStatus("delivered")}
+            disabled={busy}
+          >
+            Mark Delivered
+          </button>
+        )}
+      </div>
+
+      <div style={{ marginTop: 18 }}>
+        <div style={{ fontWeight: 900, fontSize: 16, color: "#0f172a", marginBottom: 10 }}>
+          Variety breakdown
+        </div>
 
         <div
           style={{
@@ -230,29 +328,32 @@ export default function OrderDetailPage() {
             overflow: "hidden",
           }}
         >
-          {breakdownList.map((b) => (
+          {breakdown.map((b, idx) => (
             <div
               key={b.varietyId}
               style={{
                 display: "flex",
                 justifyContent: "space-between",
                 gap: 12,
-                padding: "12px 14px",
-                borderTop: "1px solid #f1f5f9",
+                padding: "16px 16px",
+                borderTop: idx === 0 ? "none" : "1px solid #f1f5f9",
               }}
             >
-              <div style={{ fontWeight: 800 }}>
+              <div style={{ fontWeight: 900, fontSize: 16, color: "#0f172a" }}>
                 {b.qty} × {b.name}
+              </div>
+              <div style={{ fontSize: 13, color: "#64748b", whiteSpace: "nowrap" }}>
+                {b.growDays ? `${b.growDays}d` : "—"}
               </div>
             </div>
           ))}
         </div>
+      </div>
 
-        <div style={{ marginTop: 16 }}>
-          <button className="topbar-button" onClick={() => navigate("/orders")}>
-            Back to Orders
-          </button>
-        </div>
+      <div style={{ marginTop: 18 }}>
+        <button className="btn-primary" onClick={() => navigate("/orders")}>
+          Back to Orders
+        </button>
       </div>
     </div>
   );
