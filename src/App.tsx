@@ -32,6 +32,7 @@ import OrderDetailPage from "./pages/OrderDetailPage";
 import CalendarPage from "./pages/CalendarPage";
 import DashboardPage from "./pages/DashboardPage";
 import ProductionSheetPage from "./pages/ProductionSheetPage";
+import OrdersPageScreen from "./pages/OrdersPage";
 
 import type { Variety } from "./lib/storage";
 import {
@@ -1572,7 +1573,7 @@ function AppShell() {
             <Routes>
               <Route path="/" element={<DashboardPage />} />
 
-              <Route path="/orders" element={<OrdersPage />} />
+              <Route path="/orders" element={<OrdersPageScreen />} />
               <Route path="/orders/new" element={<NewOrderPage />} />
               <Route path="/orders/:groupKey" element={<OrderDetailPage />} />
 
