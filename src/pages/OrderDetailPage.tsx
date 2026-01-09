@@ -1,5 +1,5 @@
 // src/pages/OrderDetailPage.tsx
-import React, { useEffect, useMemo, useState, type CSSProperties } from "react";
+import { useEffect, useMemo, useState, type CSSProperties } from "react";
 import { useNavigate, useParams } from "react-router-dom";
 import { supabase } from "../utils/supabaseClient";
 import { formatDisplayDate } from "../utils/formatDate";
@@ -13,14 +13,14 @@ import {
   type OrderStatus,
 } from "../lib/supabaseStorage";
 
-/* ---- must match Orders grouping key exactly ---- */
-const GROUP_BUCKET_MINUTES = 5;
-
+/* ----------------- Helpers shared with Orders list ----------------- */
 function parseCreatedAtToMs(created_at?: string | null): number {
   if (!created_at) return 0;
   const ms = Date.parse(created_at);
   return Number.isFinite(ms) ? ms : 0;
 }
+
+const GROUP_BUCKET_MINUTES = 5;
 
 function groupKeyForLine(o: Order): string {
   const ms = parseCreatedAtToMs((o as any).created_at);
@@ -57,28 +57,59 @@ async function fetchVarietiesForOrders(): Promise<Variety[]> {
   }));
 }
 
-async function updateOrderStatusRow(orderId: string, status: OrderStatus) {
-  const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+async function updateOrderRow(orderId: string, patch: Partial<Order>) {
+  const { error } = await supabase.from("orders").update(patch as any).eq("id", orderId);
   if (error) throw new Error(error.message);
 }
 
+async function deleteOrderLines(ids: string[]) {
+  if (!ids.length) return;
+
+  // try delete tasks linked to orders (optional)
+  try {
+    await supabase.from("tasks").delete().in("order_id", ids as any);
+  } catch {
+    // ignore
+  }
+
+  const { error } = await supabase.from("orders").delete().in("id", ids as any);
+  if (error) throw new Error(error.message);
+}
+
+type EditableLine = {
+  id: string;
+  varietyId: string;
+  quantity: number;
+  deliveryDate: string;
+  status: OrderStatus;
+};
+
 export default function OrderDetailPage() {
   const navigate = useNavigate();
-  const { groupKey } = useParams();
+  const params = useParams();
+  const groupKey = decodeURIComponent(params.groupKey ?? "");
+
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const [orders, setOrders] = useState<Order[]>([]);
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [varieties, setVarieties] = useState<Variety[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
 
-  const decodedKey = useMemo(() => {
-    try {
-      return groupKey ? decodeURIComponent(groupKey) : "";
-    } catch {
-      return groupKey ?? "";
-    }
-  }, [groupKey]);
+  const [editLines, setEditLines] = useState<EditableLine[]>([]);
+
+  const customerName = (id: string) => customers.find((c) => c.id === id)?.name ?? "Unknown customer";
+  const varietyName = (id: string) => varieties.find((v) => v.id === id)?.name ?? "Unknown variety";
+
+  const groupLines = useMemo(() => {
+    const lines = orders.filter((o) => groupKeyForLine(o) === groupKey);
+    return lines;
+  }, [orders, groupKey]);
+
+  const groupCustomerId = groupLines[0]?.customerId ?? "";
+  const groupDeliveryDate = groupLines[0]?.deliveryDate ?? "";
+  const orderNumber = displayOrderNumber(groupKey);
 
   useEffect(() => {
     let alive = true;
@@ -88,12 +119,23 @@ export default function OrderDetailPage() {
         setLoading(true);
         setError(null);
 
-        const [os, cs, vs] = await Promise.all([getOrdersSB(), getCustomersSB(), fetchVarietiesForOrders()]);
+        const [os, cs, vs] = await Promise.all([getOrdersasap(), getCustomersSB(), fetchVarietiesForOrders()]);
         if (!alive) return;
 
         setOrders(os);
         setCustomers(cs);
         setVarieties(vs);
+
+        const lines = os.filter((o) => groupKeyForLine(o) === groupKey);
+        setEditLines(
+          lines.map((l) => ({
+            id: l.id,
+            varietyId: l.varietyId,
+            quantity: Number(l.quantity ?? 0),
+            deliveryDate: l.deliveryDate,
+            status: l.status,
+          }))
+        );
       } catch (e: any) {
         if (!alive) return;
         setError(e?.message ?? "Failed to load order.");
@@ -106,75 +148,14 @@ export default function OrderDetailPage() {
     return () => {
       alive = false;
     };
-  }, [decodedKey]);
+  }, [groupKey]);
 
-  const lines = useMemo(() => {
-    if (!decodedKey) return [];
-    return orders.filter((o) => groupKeyForLine(o) === decodedKey);
-  }, [orders, decodedKey]);
-
-  const status: OrderStatus = useMemo(() => {
-    if (!lines.length) return "confirmed";
-    const statuses = new Set(lines.map((x) => x.status));
-    return statuses.has("draft")
-      ? "draft"
-      : statuses.has("confirmed")
-      ? "confirmed"
-      : statuses.has("packed")
-      ? "packed"
-      : "delivered";
-  }, [lines]);
-
-  const customerId = lines[0]?.customerId ?? "";
-  const deliveryDate = lines[0]?.deliveryDate ?? "";
-
-  const customerName = useMemo(
-    () => customers.find((c) => c.id === customerId)?.name ?? "Order",
-    [customers, customerId]
-  );
-
-  const totalTrays = useMemo(
-    () => lines.reduce((sum, x) => sum + Number(x.quantity ?? 0), 0),
-    [lines]
-  );
-
-  const breakdown = useMemo(() => {
-    const map = new Map<string, number>();
-    for (const l of lines) {
-      map.set(l.varietyId, (map.get(l.varietyId) ?? 0) + Number(l.quantity ?? 0));
-    }
-    return Array.from(map.entries())
-      .map(([varietyId, qty]) => ({
-        varietyId,
-        qty,
-        name: varieties.find((v) => v.id === varietyId)?.name ?? "Unknown variety",
-      }))
-      .sort((a, b) => b.qty - a.qty || a.name.localeCompare(b.name));
-  }, [lines, varieties]);
-
-  async function updateWholeOrder(status: OrderStatus) {
-    // optimistic update
-    setOrders((prev) => prev.map((o) => (groupKeyForLine(o) === decodedKey ? { ...o, status } : o)));
-    await Promise.all(lines.map((l) => updateOrderStatusRow(l.id, status)));
+  async function getOrdersasap() {
+    // tiny helper so TS doesn't complain about Promise.all inference
+    return await getOrdersSB();
   }
 
-  const btn: CSSProperties = {
-    padding: "0.55rem 1.1rem",
-    borderRadius: 999,
-    border: "1px solid #cbd5f5",
-    background: "#fff",
-    color: "#0f172a",
-    fontSize: 14,
-    cursor: "pointer",
-    fontWeight: 900,
-  };
-
-  const btnPrimary: CSSProperties = {
-    ...btn,
-    border: "none",
-    background: "#047857",
-    color: "white",
-  };
+  const totalTrays = useMemo(() => editLines.reduce((s, l) => s + Number(l.quantity || 0), 0), [editLines]);
 
   if (loading) {
     return (
@@ -189,71 +170,260 @@ export default function OrderDetailPage() {
     return (
       <div className="page">
         <h1 className="page-title">Order</h1>
-        <p className="page-text" style={{ color: "#b91c1c" }}>{error}</p>
-        <button style={{ ...btn, marginTop: 12 }} onClick={() => navigate("/orders")}>Back to Orders</button>
+        <p className="page-text" style={{ color: "#b91c1c" }}>
+          {error}
+        </p>
+        <button style={secondaryBtn} onClick={() => navigate("/orders")}>
+          Back
+        </button>
       </div>
     );
   }
 
-  if (!lines.length) {
+  if (groupLines.length === 0) {
     return (
       <div className="page">
-        <h1 className="page-title">Order</h1>
-        <p className="page-text" style={{ color: "#b91c1c" }}>Order not found.</p>
-        <button style={{ ...btn, marginTop: 12 }} onClick={() => navigate("/orders")}>Back to Orders</button>
+        <h1 className="page-title">Order not found</h1>
+        <p className="page-text">
+          This order link doesn’t match any current order group. (It may have been deleted or was created before grouping.)
+        </p>
+        <button style={secondaryBtn} onClick={() => navigate("/orders")}>
+          Back to Orders
+        </button>
       </div>
     );
   }
-
-  const orderNum = displayOrderNumber(decodedKey);
 
   return (
     <div className="page">
       <h1 className="page-title">Order</h1>
 
-      <div style={{ marginTop: 8, color: "#475569", fontSize: 18 }}>
-        <strong>{customerName}</strong> • Delivery {formatDisplayDate(deliveryDate)} • Total trays:{" "}
-        <strong>{totalTrays}</strong> • Status: <strong style={{ textTransform: "capitalize" }}>{status}</strong>
-        <div style={{ marginTop: 6, fontSize: 13, opacity: 0.8 }}>{orderNum}</div>
+      <div style={{ marginTop: 8, color: "#64748b", fontSize: 13 }}>
+        <strong>{orderNumber}</strong> • {customerName(groupCustomerId)} • Delivery{" "}
+        <strong>{groupDeliveryDate ? formatDisplayDate(groupDeliveryDate) : "—"}</strong>
       </div>
 
-      {/* ✅ Only status actions (no edit/delete) */}
-      <div style={{ display: "flex", gap: 10, flexWrap: "wrap", marginTop: 14 }}>
-        {status !== "packed" && status !== "delivered" && (
-          <button style={btn} onClick={() => updateWholeOrder("packed")}>Mark Packed</button>
-        )}
-        {status !== "delivered" && (
-          <button style={btnPrimary} onClick={() => updateWholeOrder("delivered")}>Mark Delivered</button>
-        )}
-        <button style={btn} onClick={() => navigate("/orders")}>Back to Orders</button>
+      <div style={{ marginTop: 14, display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+        <span style={pill}>Lines: {editLines.length}</span>
+        <span style={pill}>Total trays: {totalTrays}</span>
+
+        <button
+          style={primaryBtn}
+          disabled={saving}
+          onClick={async () => {
+            setSaving(true);
+            try {
+              // Save each line
+              for (const l of editLines) {
+                if (!l.varietyId) throw new Error("Each line must have a variety.");
+                if (!l.deliveryDate) throw new Error("Delivery date is required.");
+                if (!l.quantity || l.quantity <= 0) throw new Error("Quantity must be > 0.");
+                await updateOrderRow(l.id, {
+                  varietyId: l.varietyId,
+                  quantity: Number(l.quantity),
+                  deliveryDate: l.deliveryDate,
+                  status: l.status,
+                });
+              }
+
+              // Reload orders so the group key stays consistent if delivery date changed
+              const fresh = await getOrdersSB();
+              setOrders(fresh);
+
+              alert("Saved.");
+              navigate("/orders");
+            } catch (e: any) {
+              alert(e?.message ?? "Failed to save changes.");
+            } finally {
+              setSaving(false);
+            }
+          }}
+        >
+          {saving ? "Saving…" : "Save Changes"}
+        </button>
+
+        <button
+          style={dangerBtn}
+          onClick={async () => {
+            const ok = window.confirm(`Delete ${orderNumber}?\n\nThis deletes ALL lines in the order.`);
+            if (!ok) return;
+            try {
+              await deleteOrderLines(editLines.map((x) => x.id));
+              alert("Deleted.");
+              navigate("/orders");
+            } catch (e: any) {
+              alert(e?.message ?? "Failed to delete order.");
+            }
+          }}
+        >
+          Delete Order
+        </button>
+
+        <button style={secondaryBtn} onClick={() => navigate("/orders")}>
+          Back
+        </button>
       </div>
 
-      <div style={{ marginTop: 18, fontWeight: 900, fontSize: 18, color: "#0f172a" }}>Variety breakdown</div>
-
-      <div
-        style={{
-          marginTop: 10,
-          border: "1px solid #e2e8f0",
-          borderRadius: 16,
-          background: "#fff",
-          overflow: "hidden",
-        }}
-      >
-        {breakdown.map((b, idx) => (
+      <div style={{ marginTop: 16, display: "grid", gap: 10 }}>
+        {editLines.map((l) => (
           <div
-            key={b.varietyId}
+            key={l.id}
             style={{
-              padding: 18,
-              borderTop: idx === 0 ? "none" : "1px solid #eef2f7",
-              fontSize: 22,
-              fontWeight: 900,
-              color: "#0f172a",
+              border: "1px solid #e2e8f0",
+              borderRadius: 14,
+              background: "#fff",
+              padding: 12,
             }}
           >
-            {b.qty} × {b.name}
+            <div style={{ display: "grid", gridTemplateColumns: "1.4fr 120px 170px", gap: 10, alignItems: "end" }}>
+              <div>
+                <div style={miniLabel}>Variety</div>
+                <select
+                  value={l.varietyId}
+                  onChange={(e) =>
+                    setEditLines((prev) =>
+                      prev.map((x) => (x.id === l.id ? { ...x, varietyId: e.target.value } : x))
+                    )
+                  }
+                  style={controlStyle}
+                >
+                  {varieties.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.name}
+                    </option>
+                  ))}
+                </select>
+                <div style={{ fontSize: 12, color: "#64748b", marginTop: 6 }}>
+                  Current: <strong>{varietyName(l.varietyId)}</strong>
+                </div>
+              </div>
+
+              <div>
+                <div style={miniLabel}>Trays</div>
+                <input
+                  type="number"
+                  min={1}
+                  value={l.quantity}
+                  onChange={(e) =>
+                    setEditLines((prev) =>
+                      prev.map((x) => (x.id === l.id ? { ...x, quantity: Number(e.target.value) } : x))
+                    )
+                  }
+                  style={controlStyle}
+                />
+              </div>
+
+              <div>
+                <div style={miniLabel}>Delivery date</div>
+                <input
+                  type="date"
+                  value={l.deliveryDate}
+                  onChange={(e) =>
+                    setEditLines((prev) =>
+                      prev.map((x) => (x.id === l.id ? { ...x, deliveryDate: e.target.value } : x))
+                    )
+                  }
+                  style={controlStyle}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: 10, display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div>
+                <div style={miniLabel}>Status</div>
+                <select
+                  value={l.status}
+                  onChange={(e) =>
+                    setEditLines((prev) =>
+                      prev.map((x) => (x.id === l.id ? { ...x, status: e.target.value as OrderStatus } : x))
+                    )
+                  }
+                  style={controlStyle}
+                >
+                  <option value="draft">draft</option>
+                  <option value="confirmed">confirmed</option>
+                  <option value="packed">packed</option>
+                  <option value="delivered">delivered</option>
+                </select>
+              </div>
+
+              <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "end" }}>
+                <button
+                  style={secondaryBtn}
+                  onClick={() => setEditLines((prev) => prev.filter((x) => x.id !== l.id))}
+                  title="Remove this line from the edit list (does not delete until you Delete Order)"
+                >
+                  Remove line (local)
+                </button>
+              </div>
+            </div>
           </div>
         ))}
+      </div>
+
+      <div style={{ marginTop: 10, fontSize: 12, color: "#64748b" }}>
+        Note: “Remove line (local)” only removes it from the edit screen. To actually delete a line from the database,
+        we can add a “Delete line” button next — but for now “Delete Order” removes everything safely.
       </div>
     </div>
   );
 }
+
+/* ----------------- Styles ----------------- */
+const miniLabel: CSSProperties = {
+  fontSize: 12,
+  color: "#64748b",
+  marginBottom: 6,
+};
+
+const controlStyle: CSSProperties = {
+  width: "100%",
+  padding: "0.45rem 0.6rem",
+  borderRadius: 8,
+  border: "1px solid #cbd5f5",
+  fontSize: 14,
+  background: "#ffffff",
+};
+
+const primaryBtn: CSSProperties = {
+  padding: "0.45rem 1.1rem",
+  borderRadius: 999,
+  border: "none",
+  background: "#047857",
+  color: "white",
+  fontSize: 14,
+  cursor: "pointer",
+  fontWeight: 900,
+};
+
+const secondaryBtn: CSSProperties = {
+  padding: "0.45rem 1.1rem",
+  borderRadius: 999,
+  border: "1px solid #cbd5f5",
+  background: "#ffffff",
+  color: "#0f172a",
+  fontSize: 14,
+  cursor: "pointer",
+  fontWeight: 900,
+};
+
+const dangerBtn: CSSProperties = {
+  padding: "0.45rem 1.1rem",
+  borderRadius: 999,
+  border: "none",
+  background: "#b91c1c",
+  color: "white",
+  fontSize: 14,
+  cursor: "pointer",
+  fontWeight: 900,
+};
+
+const pill: CSSProperties = {
+  fontSize: 12,
+  fontWeight: 900,
+  padding: "4px 10px",
+  borderRadius: 999,
+  background: "#f1f5f9",
+  color: "#0f172a",
+  whiteSpace: "nowrap",
+};
