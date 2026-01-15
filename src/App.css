@@ -1,123 +1,147 @@
-/* src/App.css */
+/* =========================
+   TrayFlow - App.css (SAFE)
+   Fixes:
+   - Restores scrolling on desktop
+   - Prevents accidental giant background/logo overlays
+   - Keeps sidebar + topbar layout stable
+   - Mobile-friendly without breaking desktop
+   ========================= */
 
-/* --------- Global-ish resets for layout stability --------- */
+/* Basic reset */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
 html,
 body,
 #root {
   height: 100%;
-  width: 100%;
-}
-
-* {
-  box-sizing: border-box;
 }
 
 body {
   margin: 0;
+  font-family: ui-sans-serif, system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
+    "Apple Color Emoji", "Segoe UI Emoji";
   background: #f5f7fb;
   color: #0f172a;
-  font-family: system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial,
-    "Apple Color Emoji", "Segoe UI Emoji";
-}
 
-/* --------- App Shell --------- */
-.app-shell {
-  height: 100vh;
-  width: 100%;
-  display: flex;
+  /* IMPORTANT:
+     Let the app control scroll in the main content area.
+     This prevents weird double-scroll / stuck scroll issues.
+  */
   overflow: hidden;
 }
 
+/* Prevent horizontal overflow surprises */
+#root {
+  overflow: hidden;
+}
+
+/* =========================
+   Layout shell
+   ========================= */
+.app-shell {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+}
+
+/* Desktop sidebar */
 .sidebar {
   width: 280px;
-  min-width: 280px;
+  flex: 0 0 280px;
   height: 100vh;
-  display: flex;
-  flex-direction: column;
+  overflow: auto;
   padding: 18px 16px;
-  background: linear-gradient(180deg, #0b3b2c 0%, #0a2f34 100%);
   color: #ffffff;
+  background: linear-gradient(180deg, #0b3b2c 0%, #0a2f34 100%);
 }
 
-.app-main {
-  flex: 1;
-  min-width: 0;
-  height: 100vh;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-}
-
-.app-main-content {
-  flex: 1;
-  min-width: 0;
-  overflow-y: auto;
-  padding: 24px;
-}
-
-/* --------- Sidebar --------- */
+/* Sidebar logo block */
 .sidebar-logo-block {
   display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 6px 6px 14px 6px;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 18px;
 }
 
 .sidebar-logo-image {
-  width: 140px;
+  width: 190px;
   height: auto;
   display: block;
 }
 
 .sidebar-subtitle {
   font-size: 12px;
-  letter-spacing: 0.12em;
-  opacity: 0.9;
+  letter-spacing: 0.08em;
+  opacity: 0.85;
 }
 
+/* Sidebar nav */
 .sidebar-nav {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 14px;
+  gap: 6px;
 }
 
 .sidebar-link {
+  display: flex;
+  align-items: center;
+  padding: 12px 12px;
+  border-radius: 14px;
   text-decoration: none;
-  color: #e6f3ee;
-  padding: 12px 14px;
-  border-radius: 999px;
-  font-size: 16px;
-  transition: background 120ms ease, color 120ms ease;
+  font-weight: 800;
+  color: rgba(255, 255, 255, 0.92);
 }
 
-.sidebar-link-inactive:hover {
-  background: rgba(255, 255, 255, 0.08);
+.sidebar-link-inactive {
+  background: transparent;
 }
 
 .sidebar-link-active {
-  background: rgba(255, 255, 255, 0.18);
-  color: #ffffff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.sidebar-link:hover {
+  background: rgba(255, 255, 255, 0.10);
 }
 
 .sidebar-footer {
-  margin-top: auto;
+  margin-top: 18px;
+  padding-top: 14px;
+  border-top: 1px solid rgba(255, 255, 255, 0.14);
   font-size: 12px;
-  opacity: 0.8;
-  padding: 10px 6px 4px 6px;
+  opacity: 0.85;
 }
 
-/* --------- Topbar --------- */
+/* Main area (topbar + scrollable content) */
+.app-main {
+  flex: 1;
+  min-width: 0;
+  height: 100vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden; /* content scroll goes in .app-main-content */
+}
+
+/* =========================
+   Topbar
+   ========================= */
 .topbar {
-  height: 72px;
-  min-height: 72px;
+  position: sticky;
+  top: 0;
+  z-index: 50;
+
+  height: 64px;
   display: flex;
   align-items: center;
-  justify-content: center;
-  position: relative;
+  justify-content: space-between;
+
+  padding: 10px 16px;
   background: #ffffff;
-  border-bottom: 1px solid #e7eef8;
-  padding: 0 20px;
+  border-bottom: 1px solid #e6edf7;
 }
 
 .topbar-center {
@@ -127,104 +151,94 @@ body {
 }
 
 .topbar-logo-image {
-  width: 36px;
-  height: 36px;
+  width: 26px;
+  height: 26px;
   display: block;
 }
 
 .topbar-title {
-  font-weight: 800;
-  letter-spacing: 0.28em;
-  color: #0b3b2c;
+  font-weight: 900;
+  letter-spacing: 0.12em;
   font-size: 14px;
 }
 
 .topbar-right {
-  position: absolute;
-  right: 20px;
   display: flex;
   align-items: center;
   gap: 10px;
 }
 
 .topbar-button {
-  padding: 10px 16px;
+  padding: 10px 14px;
   border-radius: 999px;
-  border: none;
-  background: #047857;
-  color: white;
-  font-size: 14px;
+  border: 1px solid #dbe6f7;
+  background: #ffffff;
   cursor: pointer;
-  white-space: nowrap;
+  font-weight: 800;
 }
 
-/* --------- Page styles --------- */
+.topbar-button:hover {
+  background: #f6f9ff;
+}
+
+/* =========================
+   Scrollable content area
+   ========================= */
+.app-main-content {
+  flex: 1;
+  min-height: 0;
+
+  /* This is the main scroll container */
+  overflow: auto;
+  -webkit-overflow-scrolling: touch;
+
+  padding: 18px;
+}
+
+/* Page spacing */
 .page {
-  max-width: 920px;
+  max-width: 1100px;
+  margin: 0 auto;
 }
 
 .page-title {
-  font-size: 56px;
-  margin: 6px 0 0 0;
-  font-weight: 800;
+  margin: 10px 0 14px;
+  font-size: 44px;
+  font-weight: 950;
   letter-spacing: -0.02em;
 }
 
 .page-text {
-  font-size: 16px;
-  color: #475569;
-  margin-top: 10px;
+  margin: 0;
+  color: #334155;
 }
 
-/* =========================================================
-   MOBILE (iPhone) — 10% bigger, without touching desktop
-   ========================================================= */
+/* =========================
+   Responsive
+   ========================= */
 @media (max-width: 768px) {
-  /* Keep layout full-width on mobile */
-  .app-shell {
-    display: block;
-    height: auto;
-    min-height: 100vh;
-  }
-
-  /* Sidebar is hidden; hamburger drawer handles nav */
-  .sidebar {
-    display: none;
-  }
-
-  .app-main {
-    height: auto;
-    min-height: 100vh;
+  body {
+    /* On mobile, allow page to breathe a bit; scroll still in main content */
+    overflow: hidden;
   }
 
   .app-main-content {
-    padding: 18px; /* slightly larger padding */
+    padding: 14px;
   }
 
-  /* Make text/UI feel ~10% bigger on iPhone */
-  body {
-    font-size: 110%;
-  }
-
-  /* Make the big page titles less huge on phone */
   .page-title {
-    font-size: 42px;
+    font-size: 40px;
   }
+}
 
-  /* Make topbar a bit roomier on phone */
-  .topbar {
-    min-height: 64px;
-    height: auto;
-    padding: 10px 12px;
-  }
-
-  .topbar-title {
-    font-size: 13px;
-    letter-spacing: 0.22em;
-  }
-
-  .topbar-button {
-    padding: 10px 14px;
-    font-size: 14px;
-  }
+/* =========================
+   Defensive CSS:
+   Make sure no CSS adds giant background images
+   (If you ever had a background-image set on body or main, this prevents it.)
+   ========================= */
+body,
+.app-main,
+.app-main-content,
+.page {
+  background-image: none !important;
 }

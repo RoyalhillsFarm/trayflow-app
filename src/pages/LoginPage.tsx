@@ -1,189 +1,222 @@
 // src/pages/LoginPage.tsx
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
+import trayflowIcon from "../assets/trayflow-icon.png";
 import { supabase } from "../utils/supabaseClient";
 
-type Mode = "signin" | "signup";
+const GREEN = "#047857";
 
 export default function LoginPage() {
   const navigate = useNavigate();
-
-  const [mode, setMode] = useState<Mode>("signin");
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
 
   const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [infoMsg, setInfoMsg] = useState<string | null>(null);
+  const [msg, setMsg] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
 
-  async function onSubmit(e: React.FormEvent) {
+  const canSubmit = email.trim().length > 0 && password.length > 0;
+
+  async function handleSignIn(e: React.FormEvent) {
     e.preventDefault();
-    setErrorMsg(null);
-    setInfoMsg(null);
+    setErr(null);
+    setMsg(null);
     setLoading(true);
 
     try {
-      const trimmedEmail = email.trim();
-
-      if (!trimmedEmail) throw new Error("Enter an email.");
-      if (!password) throw new Error("Enter a password.");
-      if (password.length < 6) throw new Error("Password must be at least 6 characters.");
-
-      if (mode === "signin") {
-        const { error } = await supabase.auth.signInWithPassword({
-          email: trimmedEmail,
-          password,
-        });
-
-        if (error) throw new Error(error.message);
-
-        navigate("/", { replace: true });
-        return;
-      }
-
-      // SIGN UP
-      const { data, error } = await supabase.auth.signUp({
-        email: trimmedEmail,
+      const { error } = await supabase.auth.signInWithPassword({
+        email: email.trim(),
         password,
       });
+      if (error) throw error;
 
-      if (error) throw new Error(error.message);
-
-      // If email confirmation is enabled in Supabase, session may be null until confirmed.
-      const hasSession = Boolean(data.session);
-
-      if (hasSession) {
-        navigate("/", { replace: true });
-      } else {
-        setInfoMsg(
-          "Account created. Check your email for a confirmation link, then come back and sign in."
-        );
-        setMode("signin");
-      }
+      // AppShell / RequireAuth will route them into the app after session exists
+      navigate("/", { replace: true });
     } catch (e: any) {
-      setErrorMsg(e?.message ?? "Something went wrong.");
+      setErr(e?.message ?? "Sign in failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleForgotPassword() {
+    setErr(null);
+    setMsg(null);
+
+    const cleanEmail = email.trim();
+    if (!cleanEmail) {
+      setErr("Enter your email first, then click “Forgot your password?”");
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+        redirectTo: `${window.location.origin}/reset-password`,
+      });
+      if (error) throw error;
+
+      setMsg("Password reset email sent. Check your inbox (and spam) for the TrayFlow reset link.");
+    } catch (e: any) {
+      setErr(e?.message ?? "Could not send reset email.");
     } finally {
       setLoading(false);
     }
   }
 
   return (
-    <div style={{ minHeight: "100vh", display: "grid", placeItems: "center", padding: 24 }}>
-      <div style={{ width: 380, maxWidth: "90vw" }}>
-        <h1 style={{ marginBottom: 8 }}>
-          {mode === "signin" ? "Admin Login" : "Create Account"}
-        </h1>
+    <div
+      style={{
+        minHeight: "100vh",
+        display: "grid",
+        placeItems: "center",
+        padding: 18,
+        background: "#f7fafc",
+      }}
+    >
+      <div
+        style={{
+          width: "100%",
+          maxWidth: 520,
+          background: "#ffffff",
+          border: "1px solid #e2e8f0",
+          borderRadius: 18,
+          boxShadow: "0 8px 24px rgba(15, 23, 42, 0.08)",
+          padding: 22,
+        }}
+      >
+        {/* Header */}
+        <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 14 }}>
+          <img
+            src={trayflowIcon}
+            alt="TrayFlow"
+            style={{ width: 44, height: 44, objectFit: "contain" }}
+          />
+          <div style={{ lineHeight: 1.1 }}>
+            <div style={{ fontSize: 36, fontWeight: 900, color: "#0f172a" }}>Admin Login</div>
+            <div style={{ marginTop: 6, color: "#475569", fontSize: 16 }}>
+              Sign in to manage orders, tasks, and customers.
+            </div>
+          </div>
+        </div>
 
-        <p style={{ opacity: 0.7, marginTop: 0, marginBottom: 16 }}>
-          {mode === "signin"
-            ? "Sign in to manage orders, tasks, and customers."
-            : "Create an account to access TrayFlow."}
-        </p>
+        {/* Messages */}
+        {err && (
+          <div
+            style={{
+              background: "#fee2e2",
+              color: "#991b1b",
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #fecaca",
+              fontWeight: 700,
+              marginBottom: 12,
+            }}
+          >
+            {err}
+          </div>
+        )}
 
-        <form onSubmit={onSubmit} style={{ display: "grid", gap: 12 }}>
+        {msg && (
+          <div
+            style={{
+              background: "#dcfce7",
+              color: "#065f46",
+              padding: "10px 12px",
+              borderRadius: 12,
+              border: "1px solid #bbf7d0",
+              fontWeight: 700,
+              marginBottom: 12,
+            }}
+          >
+            {msg}
+          </div>
+        )}
+
+        {/* Form */}
+        <form onSubmit={handleSignIn} style={{ display: "grid", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 12, opacity: 0.8 }}>Email</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>Email</span>
             <input
-              value={email}
-              onChange={(e) => setEmail(e.target.value)}
               type="email"
               autoComplete="email"
-              required
-              style={{ padding: 10, borderRadius: 10, border: "1px solid rgba(0,0,0,0.2)" }}
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="you@company.com"
+              style={{
+                width: "100%",
+                padding: "12px 14px",
+                borderRadius: 14,
+                border: "1px solid #cbd5e1",
+                fontSize: 16,
+                outline: "none",
+              }}
             />
           </label>
 
           <label style={{ display: "grid", gap: 6 }}>
-            <span style={{ fontSize: 12, opacity: 0.8 }}>Password</span>
+            <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>Password</span>
             <input
+              type="password"
+              autoComplete="current-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              type="password"
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
-              required
-              style={{ padding: 10, borderRadius: 10, border: "1px solid rgba(0,0,0,0.2)" }}
+              placeholder="••••••••"
+              style={{
+                width: "100%",
+                padding: "12px 14px",
+                borderRadius: 14,
+                border: "1px solid #cbd5e1",
+                fontSize: 16,
+                outline: "none",
+              }}
             />
-            {mode === "signup" && (
-              <small style={{ opacity: 0.7 }}>At least 6 characters.</small>
-            )}
           </label>
-
-          {errorMsg && (
-            <div style={{ padding: 10, borderRadius: 10, background: "rgba(255,0,0,0.08)" }}>
-              {errorMsg}
-            </div>
-          )}
-
-          {infoMsg && (
-            <div style={{ padding: 10, borderRadius: 10, background: "rgba(0,128,0,0.08)" }}>
-              {infoMsg}
-            </div>
-          )}
 
           <button
             type="submit"
-            disabled={loading}
+            disabled={!canSubmit || loading}
             style={{
-              padding: 12,
-              borderRadius: 12,
-              border: "1px solid rgba(0,0,0,0.2)",
-              background: "#111",
+              width: "100%",
+              padding: "14px 16px",
+              borderRadius: 16,
+              border: "none",
+              background: GREEN,
               color: "white",
-              fontWeight: 700,
-              cursor: "pointer",
+              fontSize: 18,
+              fontWeight: 900,
+              cursor: !canSubmit || loading ? "not-allowed" : "pointer",
+              opacity: !canSubmit || loading ? 0.7 : 1,
+              marginTop: 6,
             }}
           >
-            {loading
-              ? mode === "signin"
-                ? "Signing in..."
-                : "Creating..."
-              : mode === "signin"
-              ? "Sign in"
-              : "Create account"}
+            {loading ? "Working…" : "Sign in"}
+          </button>
+
+          <button
+            type="button"
+            onClick={handleForgotPassword}
+            disabled={loading}
+            style={{
+              background: "transparent",
+              border: "none",
+              color: GREEN,
+              fontWeight: 900,
+              fontSize: 16,
+              cursor: loading ? "not-allowed" : "pointer",
+              textDecoration: "underline",
+              textAlign: "left",
+              padding: 0,
+              marginTop: 2,
+            }}
+          >
+            Forgot your password?
           </button>
         </form>
 
-        <div style={{ marginTop: 14, display: "flex", justifyContent: "space-between" }}>
-          {mode === "signin" ? (
-            <button
-              type="button"
-              onClick={() => {
-                setErrorMsg(null);
-                setInfoMsg(null);
-                setMode("signup");
-              }}
-              style={{
-                border: "none",
-                background: "transparent",
-                padding: 0,
-                cursor: "pointer",
-                textDecoration: "underline",
-                opacity: 0.85,
-              }}
-            >
-              Don’t have an account? Create one
-            </button>
-          ) : (
-            <button
-              type="button"
-              onClick={() => {
-                setErrorMsg(null);
-                setInfoMsg(null);
-                setMode("signin");
-              }}
-              style={{
-                border: "none",
-                background: "transparent",
-                padding: 0,
-                cursor: "pointer",
-                textDecoration: "underline",
-                opacity: 0.85,
-              }}
-            >
-              Already have an account? Sign in
-            </button>
-          )}
+        <div style={{ marginTop: 14, color: "#64748b", fontSize: 12, opacity: 0.9 }}>
+          Tip: Enter your email above, click “Forgot your password?”, then use the link in the email to set a new password.
         </div>
       </div>
     </div>

@@ -30,6 +30,7 @@ import Varieties from "./pages/Varieties";
 import CustomersPage from "./pages/CustomersPage";
 import ProductionSheetPage from "./pages/ProductionSheetPage";
 import LoginPage from "./pages/LoginPage";
+import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 /* ----------------- MOBILE DETECTOR ----------------- */
 function useIsMobile() {
@@ -388,8 +389,11 @@ function AppShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
   // On /login we don't want to show the whole app chrome.
-  const isLogin = location.pathname === "/login";
-  if (isLogin) return <LoginGate />;
+  const isAuthRoute =
+  location.pathname === "/login" ||
+  location.pathname === "/reset-password";
+
+if (isAuthRoute) return <LoginGate />;
 
   return (
     <RequireAuth>
@@ -459,11 +463,18 @@ function LoginGate() {
     );
   }
 
-  if (authed) return <Navigate to="/" replace />;
+  const location = useLocation();
+
+// If the user is coming from a recovery link, Supabase will create a session.
+// We must allow /reset-password to render even if authed.
+if (authed && location.pathname !== "/reset-password") {
+  return <Navigate to="/" replace />;
+}
 
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>
   );
