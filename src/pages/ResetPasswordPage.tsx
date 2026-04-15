@@ -21,26 +21,35 @@ export default function ResetPasswordPage() {
         setLoading(true);
         setError(null);
 
-        // Handle both styles:
-        // 1) ?code=... (PKCE flow)
-        // 2) #access_token=... (implicit/hash flow)
         const url = new URL(window.location.href);
         const code = url.searchParams.get("code");
 
+        // If PKCE, we must exchange the code to create a session
         if (code) {
           const { error: exchErr } = await supabase.auth.exchangeCodeForSession(code);
           if (exchErr) throw exchErr;
-        } else {
-          // If it's a hash-token link, Supabase will pick it up on getSession
-          const { data, error: sessErr } = await supabase.auth.getSession();
-          if (sessErr) throw sessErr;
 
-          // No session => user opened /reset-password directly
-          if (!data.session) {
-            setError("Please open the password reset link from your email again.");
-            setReady(false);
-            return;
-          }
+          // Optional cleanup: remove ?code=... from the URL so refresh doesn’t re-run exchange
+          url.searchParams.delete("code");
+          window.history.replaceState({}, document.title, url.toString());
+        }
+
+        // Now confirm we actually have a session
+        const { data, error: sessErr } = await supabase.auth.getSession();
+        if (sessErr) throw sessErr;
+
+        if (!data.session) {
+          setError("Please open the password reset link from your email again.");
+          setReady(false);
+          return;
+        }
+
+        // Optional safety: only allow real recovery sessions to stay here
+        // If this ever blocks you, comment it out, but it prevents random access.
+        if (!data.session.user?.recovery) {
+          // They’re logged in normally (not via recovery). Send them home.
+          navigate("/", { replace: true });
+          return;
         }
 
         if (!alive) return;
@@ -58,7 +67,7 @@ export default function ResetPasswordPage() {
     return () => {
       alive = false;
     };
-  }, []);
+  }, [navigate]);
 
   const handleSave = async () => {
     setError(null);
@@ -77,7 +86,7 @@ export default function ResetPasswordPage() {
       const { error: updErr } = await supabase.auth.updateUser({ password });
       if (updErr) throw updErr;
 
-      // Optional but recommended: sign out so they re-login with the new password
+      // Recommended: sign out so they log in fresh with new password
       await supabase.auth.signOut();
 
       navigate("/login", { replace: true });

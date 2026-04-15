@@ -22,7 +22,6 @@ import DashboardPage from "./pages/DashboardPage";
 import OrdersPage from "./pages/OrdersPage";
 import NewOrderPage from "./pages/NewOrderPage";
 import OrderDetailPage from "./pages/OrderDetailPage";
-
 import TasksPage from "./pages/TasksPage";
 import NewTaskPage from "./pages/NewTaskPage";
 import CalendarPage from "./pages/CalendarPage";
@@ -30,6 +29,8 @@ import Varieties from "./pages/Varieties";
 import CustomersPage from "./pages/CustomersPage";
 import ProductionSheetPage from "./pages/ProductionSheetPage";
 import LoginPage from "./pages/LoginPage";
+import SignupPage from "./pages/SignupPage";
+import PlanSelectionPage from "./pages/PlanSelectionPage";
 import ResetPasswordPage from "./pages/ResetPasswordPage";
 
 /* ----------------- MOBILE DETECTOR ----------------- */
@@ -41,7 +42,6 @@ function useIsMobile() {
     const update = () => setIsMobile(mq.matches);
     update();
 
-    // Newer browsers
     if ("addEventListener" in mq) {
       mq.addEventListener("change", update);
       return () => mq.removeEventListener("change", update);
@@ -185,7 +185,6 @@ function MobileDrawer({
 }) {
   const location = useLocation();
 
-  // Close drawer on navigation
   useEffect(() => {
     if (open) onClose();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -388,12 +387,13 @@ function AppShell() {
   const isMobile = useIsMobile();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // On /login we don't want to show the whole app chrome.
   const isAuthRoute =
-  location.pathname === "/login" ||
-  location.pathname === "/reset-password";
+    location.pathname === "/login" ||
+    location.pathname === "/signup" ||
+    location.pathname === "/choose-plan" ||
+    location.pathname === "/reset-password";
 
-if (isAuthRoute) return <LoginGate />;
+  if (isAuthRoute) return <LoginGate />;
 
   return (
     <RequireAuth>
@@ -432,6 +432,7 @@ if (isAuthRoute) return <LoginGate />;
 }
 
 function LoginGate() {
+  const location = useLocation();
   const [checking, setChecking] = useState(true);
   const [authed, setAuthed] = useState(false);
 
@@ -463,17 +464,19 @@ function LoginGate() {
     );
   }
 
-  const location = useLocation();
+  const isResetRoute = location.pathname === "/reset-password";
+  const isSignupRoute = location.pathname === "/signup";
+  const isChoosePlanRoute = location.pathname === "/choose-plan";
 
-// If the user is coming from a recovery link, Supabase will create a session.
-// We must allow /reset-password to render even if authed.
-if (authed && location.pathname !== "/reset-password") {
-  return <Navigate to="/" replace />;
-}
+  if (authed && !isResetRoute && !isSignupRoute && !isChoosePlanRoute) {
+    return <Navigate to="/" replace />;
+  }
 
   return (
     <Routes>
       <Route path="/login" element={<LoginPage />} />
+      <Route path="/signup" element={<SignupPage />} />
+      <Route path="/choose-plan" element={<PlanSelectionPage />} />
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route path="*" element={<Navigate to="/login" replace />} />
     </Routes>

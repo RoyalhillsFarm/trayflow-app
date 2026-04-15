@@ -1,4 +1,4 @@
-// src/pages/LoginPage.tsx
+// src/pages/SignupPage.tsx
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import trayflowIcon from "../assets/trayflow-icon.png";
@@ -6,59 +6,58 @@ import { supabase } from "../utils/supabaseClient";
 
 const GREEN = "#047857";
 
-export default function LoginPage() {
+export default function SignupPage() {
   const navigate = useNavigate();
 
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [confirm, setConfirm] = useState("");
 
   const [loading, setLoading] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
 
-  const canSubmit = email.trim().length > 0 && password.length > 0;
+  const canSubmit =
+    email.trim().length > 0 &&
+    password.length >= 8 &&
+    confirm.length >= 8 &&
+    !loading;
 
-  async function handleSignIn(e: React.FormEvent) {
+  async function handleSignup(e: React.FormEvent) {
     e.preventDefault();
     setErr(null);
     setMsg(null);
-    setLoading(true);
 
-    try {
-      const { error } = await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
-      if (error) throw error;
+    const cleanEmail = email.trim().toLowerCase();
 
-      navigate("/", { replace: true });
-    } catch (e: any) {
-      setErr(e?.message ?? "Sign in failed.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  async function handleForgotPassword() {
-    setErr(null);
-    setMsg(null);
-
-    const cleanEmail = email.trim();
     if (!cleanEmail) {
-      setErr("Enter your email first, then click “Forgot your password?”");
+      setErr("Please enter your email.");
+      return;
+    }
+
+    if (password.length < 8) {
+      setErr("Password must be at least 8 characters.");
+      return;
+    }
+
+    if (password !== confirm) {
+      setErr("Passwords do not match.");
       return;
     }
 
     setLoading(true);
     try {
-      const { error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
-        redirectTo: `${window.location.origin}/reset-password`,
+      const { error } = await supabase.auth.signUp({
+        email: cleanEmail,
+        password,
       });
+
       if (error) throw error;
 
-      setMsg("Password reset email sent. Check your inbox and spam for the TrayFlow reset link.");
+      setMsg("Account created. Next, choose your TrayFlow plan.");
+      navigate("/choose-plan", { replace: true });
     } catch (e: any) {
-      setErr(e?.message ?? "Could not send reset email.");
+      setErr(e?.message ?? "Could not create account.");
     } finally {
       setLoading(false);
     }
@@ -92,9 +91,11 @@ export default function LoginPage() {
             style={{ width: 44, height: 44, objectFit: "contain" }}
           />
           <div style={{ lineHeight: 1.1 }}>
-            <div style={{ fontSize: 36, fontWeight: 900, color: "#0f172a" }}>Admin Login</div>
+            <div style={{ fontSize: 34, fontWeight: 900, color: "#0f172a" }}>
+              Create Account
+            </div>
             <div style={{ marginTop: 6, color: "#475569", fontSize: 16 }}>
-              Sign in to manage orders, tasks, and customers.
+              Start your TrayFlow workspace.
             </div>
           </div>
         </div>
@@ -131,7 +132,7 @@ export default function LoginPage() {
           </div>
         )}
 
-        <form onSubmit={handleSignIn} style={{ display: "grid", gap: 12 }}>
+        <form onSubmit={handleSignup} style={{ display: "grid", gap: 12 }}>
           <label style={{ display: "grid", gap: 6 }}>
             <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>Email</span>
             <input
@@ -155,10 +156,31 @@ export default function LoginPage() {
             <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>Password</span>
             <input
               type="password"
-              autoComplete="current-password"
+              autoComplete="new-password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
-              placeholder="••••••••"
+              placeholder="At least 8 characters"
+              style={{
+                width: "100%",
+                padding: "12px 14px",
+                borderRadius: 14,
+                border: "1px solid #cbd5e1",
+                fontSize: 16,
+                outline: "none",
+              }}
+            />
+          </label>
+
+          <label style={{ display: "grid", gap: 6 }}>
+            <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
+              Confirm Password
+            </span>
+            <input
+              type="password"
+              autoComplete="new-password"
+              value={confirm}
+              onChange={(e) => setConfirm(e.target.value)}
+              placeholder="Re-enter password"
               style={{
                 width: "100%",
                 padding: "12px 14px",
@@ -172,7 +194,7 @@ export default function LoginPage() {
 
           <button
             type="submit"
-            disabled={!canSubmit || loading}
+            disabled={!canSubmit}
             style={{
               width: "100%",
               padding: "14px 16px",
@@ -182,38 +204,17 @@ export default function LoginPage() {
               color: "white",
               fontSize: 18,
               fontWeight: 900,
-              cursor: !canSubmit || loading ? "not-allowed" : "pointer",
-              opacity: !canSubmit || loading ? 0.7 : 1,
+              cursor: !canSubmit ? "not-allowed" : "pointer",
+              opacity: !canSubmit ? 0.7 : 1,
               marginTop: 6,
             }}
           >
-            {loading ? "Working…" : "Sign in"}
+            {loading ? "Creating account…" : "Create account"}
           </button>
 
           <button
             type="button"
-            onClick={handleForgotPassword}
-            disabled={loading}
-            style={{
-              background: "transparent",
-              border: "none",
-              color: GREEN,
-              fontWeight: 900,
-              fontSize: 16,
-              cursor: loading ? "not-allowed" : "pointer",
-              textDecoration: "underline",
-              textAlign: "left",
-              padding: 0,
-              marginTop: 2,
-            }}
-          >
-            Forgot your password?
-          </button>
-
-          <button
-            type="button"
-            onClick={() => navigate("/signup")}
-            disabled={loading}
+            onClick={() => navigate("/login")}
             style={{
               width: "100%",
               padding: "14px 16px",
@@ -223,17 +224,13 @@ export default function LoginPage() {
               color: "#0f172a",
               fontSize: 17,
               fontWeight: 800,
-              cursor: loading ? "not-allowed" : "pointer",
+              cursor: "pointer",
               marginTop: 4,
             }}
           >
-            Create account
+            Back to login
           </button>
         </form>
-
-        <div style={{ marginTop: 14, color: "#64748b", fontSize: 12, opacity: 0.9 }}>
-          Tip: Enter your email above, click “Forgot your password?”, then use the link in the email to set a new password.
-        </div>
       </div>
     </div>
   );
