@@ -631,6 +631,11 @@ export default function Varieties() {
     return `${enabledCount} / ${accountInfo.maxVarieties} Active`;
   }, [accountInfo, enabledCount]);
 
+  const varietyLimitText =
+    accountInfo?.maxVarieties == null
+      ? "Unlimited varieties"
+      : `${accountInfo.maxVarieties} variety limit`;
+
   return (
     <div className="page">
       <div
@@ -663,11 +668,7 @@ export default function Varieties() {
             <span>•</span>
             <span>{planLabel}</span>
             <span>•</span>
-            <span>
-              {accountInfo?.maxVarieties === null
-                ? "Unlimited varieties"
-                : `${accountInfo?.maxVarieties} variety limit`}
-            </span>
+            <span>{varietyLimitText}</span>
           </div>
         </div>
 
@@ -702,7 +703,7 @@ export default function Varieties() {
             You’ve reached your active variety limit.
           </div>
           <div style={{ fontSize: 14, color: "#166534" }}>
-            {accountInfo.plan === "sprout"
+            {accountInfo?.plan === "sprout"
               ? "Upgrade to Farmer to unlock up to 35 active varieties."
               : "Upgrade to Commercial Farm for unlimited active varieties."}
           </div>
@@ -935,7 +936,9 @@ export default function Varieties() {
             <button
               type="button"
               onClick={() => {
-                alert("Upgrade flow placeholder: next we can connect this button to billing, a contact form, or an upgrade request page.");
+                alert(
+                  "Upgrade flow placeholder: next we can connect this button to billing, a contact form, or an upgrade request page."
+                );
               }}
               style={primaryButtonStyle}
             >
