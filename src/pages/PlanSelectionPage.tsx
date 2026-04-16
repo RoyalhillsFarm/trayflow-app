@@ -198,7 +198,7 @@ export default function PlanSelectionPage() {
           />
           <div style={{ lineHeight: 1.1 }}>
             <div style={{ fontSize: 34, fontWeight: 900, color: "#0f172a" }}>
-              Choose Your Plan
+              Choose Your Plan - CHECKOUT TEST
             </div>
             <div style={{ marginTop: 6, color: "#475569", fontSize: 16 }}>
               Set up your TrayFlow workspace with the plan that fits your farm.
