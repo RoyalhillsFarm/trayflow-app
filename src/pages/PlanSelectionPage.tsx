@@ -1,11 +1,9 @@
 // src/pages/PlanSelectionPage.tsx
 import { useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import trayflowIcon from "../assets/trayflow-icon.png";
 import { supabase } from "../utils/supabaseClient";
 
 const GREEN = "#047857";
-const MASTER_ACCOUNT_ID = "d564692f-cfc4-4b32-8d10-5ce4d6eee0c1";
 
 type PlanKey = "sprout" | "farmer" | "commercial";
 
@@ -45,50 +43,7 @@ const PLAN_COPY: Record<
   },
 };
 
-const SPROUT_VARIETY_NAMES = [
-  "Arugula",
-  "Basil",
-  "Broccoli",
-  "Cabbage (Red)",
-  "Mild Mix",
-  "Mustard",
-  "Pea Shoots",
-  "Radish (Purple Plum)",
-  "Spicy Mix",
-  "Sunflower",
-] as const;
-
-type MasterVarietyRow = {
-  variety: string;
-  scientific_name: string | null;
-  seed_weight_g_1020: number | null;
-  soak_hours: number | null;
-  blackout_days: number | null;
-  harvest_days: number | null;
-  expected_yield_oz_1020: number | null;
-  difficulty: string | null;
-  pro_tips: string | null;
-  flavor_profile: string | null;
-  best_uses: string | null;
-  visual_notes: string | null;
-  chef_notes: string | null;
-  market_notes: string | null;
-  spray_per_day_blackout: number | null;
-  spray_during_blackout: boolean | null;
-  water_after_lights_on: boolean | null;
-  water_per_day: number | null;
-  has_lights_on_task: boolean | null;
-  default_pack_size_oz: number | null;
-};
-
-function prettyPlan(plan: PlanKey) {
-  if (plan === "commercial") return "Commercial Farm";
-  return plan.charAt(0).toUpperCase() + plan.slice(1);
-}
-
 export default function PlanSelectionPage() {
-  const navigate = useNavigate();
-
   const [farmName, setFarmName] = useState("");
   const [loadingPlan, setLoadingPlan] = useState<PlanKey | null>(null);
   const [err, setErr] = useState<string | null>(null);
@@ -96,79 +51,53 @@ export default function PlanSelectionPage() {
 
   const canSubmit = useMemo(() => farmName.trim().length > 0, [farmName]);
 
-  async function seedSproutVarieties(accountId: string) {
-    const { data: masterRows, error: fetchErr } = await supabase
-      .from("varieties")
-      .select(
-        `
-          variety,
-          scientific_name,
-          seed_weight_g_1020,
-          soak_hours,
-          blackout_days,
-          harvest_days,
-          expected_yield_oz_1020,
-          difficulty,
-          pro_tips,
-          flavor_profile,
-          best_uses,
-          visual_notes,
-          chef_notes,
-          market_notes,
-          spray_per_day_blackout,
-          spray_during_blackout,
-          water_after_lights_on,
-          water_per_day,
-          has_lights_on_task,
-          default_pack_size_oz
-        `
-      )
-      .eq("account_id", MASTER_ACCOUNT_ID)
-      .in("variety", [...SPROUT_VARIETY_NAMES])
-      .order("variety", { ascending: true });
+  async function getOrCreatePendingAccount(userId: string, email: string, farm: string) {
+    const { data: existingProfile, error: profileLookupErr } = await supabase
+      .from("profiles")
+      .select("id, account_id")
+      .eq("id", userId)
+      .maybeSingle();
 
-    if (fetchErr) throw fetchErr;
+    if (profileLookupErr) throw profileLookupErr;
 
-    const rows = (masterRows ?? []) as MasterVarietyRow[];
+    let accountId = existingProfile?.account_id ?? null;
 
-    if (rows.length !== SPROUT_VARIETY_NAMES.length) {
-      const found = new Set(rows.map((r) => r.variety));
-      const missing = SPROUT_VARIETY_NAMES.filter((name) => !found.has(name));
-      throw new Error(
-        `Sprout starter library is missing ${missing.length} variety record(s): ${missing.join(
-          ", "
-        )}`
-      );
+    if (!accountId) {
+      accountId = crypto.randomUUID();
+
+      const { error: accountInsertErr } = await supabase.from("accounts").insert({
+        id: accountId,
+        name: farm,
+        plan: "pending",
+      });
+
+      if (accountInsertErr) throw accountInsertErr;
+    } else {
+      const { error: accountUpdateErr } = await supabase
+        .from("accounts")
+        .update({
+          name: farm,
+          plan: "pending",
+        })
+        .eq("id", accountId);
+
+      if (accountUpdateErr) throw accountUpdateErr;
     }
 
-    const inserts = rows.map((row) => ({
-      variety: row.variety,
-      scientific_name: row.scientific_name,
-      seed_weight_g_1020: row.seed_weight_g_1020,
-      soak_hours: row.soak_hours,
-      blackout_days: row.blackout_days,
-      harvest_days: row.harvest_days,
-      expected_yield_oz_1020: row.expected_yield_oz_1020,
-      difficulty: row.difficulty,
-      pro_tips: row.pro_tips,
-      flavor_profile: row.flavor_profile,
-      best_uses: row.best_uses,
-      visual_notes: row.visual_notes,
-      chef_notes: row.chef_notes,
-      market_notes: row.market_notes,
-      spray_per_day_blackout: row.spray_per_day_blackout,
-      spray_during_blackout: row.spray_during_blackout,
-      water_after_lights_on: row.water_after_lights_on,
-      water_per_day: row.water_per_day,
-      has_lights_on_task: row.has_lights_on_task,
-      default_pack_size_oz: row.default_pack_size_oz,
-      account_id: accountId,
-      disabled_at: null,
-    }));
+    const { error: profileUpsertErr } = await supabase.from("profiles").upsert(
+      {
+        id: userId,
+        email: email || null,
+        account_id: accountId,
+        role: "admin",
+        plan: "pending",
+      },
+      { onConflict: "id" }
+    );
 
-    const { error: insertErr } = await supabase.from("varieties").insert(inserts);
+    if (profileUpsertErr) throw profileUpsertErr;
 
-    if (insertErr) throw insertErr;
+    return accountId;
   }
 
   async function handleChoosePlan(plan: PlanKey) {
@@ -193,38 +122,42 @@ export default function PlanSelectionPage() {
         throw new Error("No signed-in user found. Please create your account again.");
       }
 
-      const accountId = crypto.randomUUID();
       const cleanEmail = user.email?.trim().toLowerCase() ?? "";
+      const cleanFarmName = farmName.trim();
 
-      const { error: accountErr } = await supabase.from("accounts").insert({
-        id: accountId,
-        name: farmName.trim(),
-        plan,
-      });
-
-      if (accountErr) throw accountErr;
-
-      const { error: profileErr } = await supabase.from("profiles").upsert(
-        {
-          id: user.id,
-          email: cleanEmail || null,
-          account_id: accountId,
-          role: "admin",
-          plan,
-        },
-        { onConflict: "id" }
+      const accountId = await getOrCreatePendingAccount(
+        user.id,
+        cleanEmail,
+        cleanFarmName
       );
 
-      if (profileErr) throw profileErr;
+      const resp = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          plan,
+          accountId,
+          userId: user.id,
+          email: cleanEmail,
+        }),
+      });
 
-      if (plan === "sprout") {
-        await seedSproutVarieties(accountId);
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        throw new Error(data.error || "Could not start checkout.");
       }
 
-      setMsg(`${prettyPlan(plan)} selected. Your TrayFlow workspace is ready.`);
-      navigate("/", { replace: true });
+      if (!data.url) {
+        throw new Error("Stripe Checkout URL was not returned.");
+      }
+
+      setMsg("Redirecting to secure checkout...");
+      window.location.href = data.url;
     } catch (e: any) {
-      setErr(e?.message ?? "Could not set up your workspace.");
+      setErr(e?.message ?? "Could not start checkout.");
     } finally {
       setLoadingPlan(null);
     }
@@ -252,8 +185,12 @@ export default function PlanSelectionPage() {
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
-          <img src={trayflowIcon} alt="TrayFlow" style={{ width: 44, height: 44 }} />
-          <div>
+          <img
+            src={trayflowIcon}
+            alt="TrayFlow"
+            style={{ width: 44, height: 44, objectFit: "contain" }}
+          />
+          <div style={{ lineHeight: 1.1 }}>
             <div style={{ fontSize: 34, fontWeight: 900, color: "#0f172a" }}>
               Choose Your Plan
             </div>
@@ -269,10 +206,10 @@ export default function PlanSelectionPage() {
               background: "#fee2e2",
               color: "#991b1b",
               padding: "10px 12px",
-              borderRadius: 10,
-              marginBottom: 10,
+              borderRadius: 12,
               border: "1px solid #fecaca",
               fontWeight: 700,
+              marginBottom: 12,
             }}
           >
             {err}
@@ -285,18 +222,18 @@ export default function PlanSelectionPage() {
               background: "#dcfce7",
               color: "#065f46",
               padding: "10px 12px",
-              borderRadius: 10,
-              marginBottom: 10,
+              borderRadius: 12,
               border: "1px solid #bbf7d0",
               fontWeight: 700,
+              marginBottom: 12,
             }}
           >
             {msg}
           </div>
         )}
 
-        <div style={{ marginBottom: 20 }}>
-          <label style={{ display: "grid", gap: 6, maxWidth: 500 }}>
+        <div style={{ marginBottom: 18 }}>
+          <label style={{ display: "grid", gap: 6, maxWidth: 520 }}>
             <span style={{ fontSize: 14, fontWeight: 800, color: "#0f172a" }}>
               Farm or Workspace Name
             </span>
@@ -307,8 +244,8 @@ export default function PlanSelectionPage() {
               placeholder="Royal Hills Farm"
               style={{
                 width: "100%",
-                padding: 12,
-                borderRadius: 12,
+                padding: "12px 14px",
+                borderRadius: 14,
                 border: "1px solid #cbd5e1",
                 fontSize: 16,
                 outline: "none",
@@ -325,7 +262,8 @@ export default function PlanSelectionPage() {
           }}
         >
           {(Object.keys(PLAN_COPY) as PlanKey[]).map((plan) => {
-            const p = PLAN_COPY[plan];
+            const info = PLAN_COPY[plan];
+            const isLoading = loadingPlan === plan;
 
             return (
               <div
@@ -334,52 +272,67 @@ export default function PlanSelectionPage() {
                   border: "1px solid #e2e8f0",
                   borderRadius: 18,
                   padding: 18,
+                  background: "#ffffff",
+                  boxShadow: "0 6px 18px rgba(15, 23, 42, 0.04)",
                 }}
               >
                 <div style={{ fontSize: 22, fontWeight: 900, color: "#0f172a" }}>
-                  {p.title}
+                  {info.title}
                 </div>
 
-                <div style={{ marginTop: 8, fontSize: 14, color: "#475569", lineHeight: 1.5 }}>
-                  {p.subtitle}
+                <div
+                  style={{
+                    marginTop: 8,
+                    color: "#475569",
+                    fontSize: 14,
+                    lineHeight: 1.5,
+                    minHeight: 66,
+                  }}
+                >
+                  {info.subtitle}
                 </div>
 
                 <div
                   style={{
                     marginTop: 14,
-                    fontWeight: 700,
-                    color: "#0f172a",
                     display: "grid",
                     gap: 8,
+                    color: "#0f172a",
+                    fontSize: 14,
+                    fontWeight: 700,
                   }}
                 >
-                  <div>{p.varieties}</div>
-                  <div>{p.seats}</div>
+                  <div>{info.varieties}</div>
+                  <div>{info.seats}</div>
                 </div>
 
                 <button
                   type="button"
-                  onClick={() => handleChoosePlan(plan)}
                   disabled={!canSubmit || loadingPlan !== null}
+                  onClick={() => handleChoosePlan(plan)}
                   style={{
-                    marginTop: 16,
                     width: "100%",
-                    padding: 12,
-                    borderRadius: 12,
+                    marginTop: 18,
+                    padding: "14px 16px",
+                    borderRadius: 16,
                     border: "none",
                     background: GREEN,
                     color: "white",
-                    fontWeight: 800,
                     fontSize: 16,
+                    fontWeight: 900,
                     cursor: !canSubmit || loadingPlan !== null ? "not-allowed" : "pointer",
                     opacity: !canSubmit || loadingPlan !== null ? 0.7 : 1,
                   }}
                 >
-                  {loadingPlan === plan ? "Setting up…" : p.cta}
+                  {isLoading ? "Redirecting…" : info.cta}
                 </button>
               </div>
             );
           })}
+        </div>
+
+        <div style={{ marginTop: 16, color: "#64748b", fontSize: 12 }}>
+          You can upgrade your plan later as your farm grows.
         </div>
       </div>
     </div>
