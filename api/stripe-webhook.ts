@@ -1,139 +1,103 @@
 import Stripe from "stripe";
-import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 
-export const config = {
-  api: {
-    bodyParser: false,
-  },
-};
-
+// ✅ Initialize Stripe (UPDATED VERSION)
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY as string, {
-  apiVersion: "2025-03-31.basil",
+  apiVersion: "2026-03-25.dahlia",
 });
 
+// ✅ Supabase admin client (bypasses RLS)
 const supabase = createClient(
   process.env.SUPABASE_URL as string,
   process.env.SUPABASE_SERVICE_ROLE_KEY as string
 );
 
-async function getRawBody(req: VercelRequest): Promise<Buffer> {
-  const chunks: Buffer[] = [];
-  for await (const chunk of req) {
-    chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
-  }
-  return Buffer.concat(chunks);
+// ✅ Helper: map Stripe price → plan
+function getPlanFromPrice(priceId: string): string {
+  if (priceId === process.env.STRIPE_PRICE_SPROUT) return "sprout";
+  if (priceId === process.env.STRIPE_PRICE_FARMER) return "farmer";
+  if (priceId === process.env.STRIPE_PRICE_COMMERCIAL) return "commercial";
+  return "free";
 }
 
-async function activatePlan(opts: {
-  accountId: string;
-  userId: string;
-  plan: string;
-  stripeCustomerId?: string | null;
-  stripeSubscriptionId?: string | null;
-}) {
-  const { accountId, userId, plan } = opts;
+// ✅ Main handler
+export default async function handler(
+  req: VercelRequest,
+  res: VercelResponse
+) {
+  const sig = req.headers["stripe-signature"] as string;
 
-  const { error: accountErr } = await supabase
-    .from("accounts")
-    .update({
-      plan,
-    })
-    .eq("id", accountId);
+  let event: Stripe.Event;
 
-  if (accountErr) throw accountErr;
-
-  const { error: profileErr } = await supabase
-    .from("profiles")
-    .update({
-      plan,
-      role: "admin",
-      account_id: accountId,
-    })
-    .eq("id", userId);
-
-  if (profileErr) throw profileErr;
-}
-
-async function downgradePlan(opts: {
-  stripeCustomerId?: string | null;
-  stripeSubscriptionId?: string | null;
-}) {
-  const { stripeCustomerId, stripeSubscriptionId } = opts;
-
-  if (!stripeCustomerId && !stripeSubscriptionId) return;
-
-  // Placeholder for later if you add stripe IDs to accounts/profiles.
-  // For now, keep this function here so the webhook structure is future-ready.
-  return;
-}
-
-export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") {
-    return res.status(405).send("Method not allowed");
-  }
-
-  const signature = req.headers["stripe-signature"];
-  if (!signature) {
-    return res.status(400).send("Missing Stripe-Signature header");
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      sig,
+      process.env.STRIPE_WEBHOOK_SECRET as string
+    );
+  } catch (err: any) {
+    console.error("❌ Webhook signature verification failed.", err.message);
+    return res.status(400).send(`Webhook Error: ${err.message}`);
   }
 
   try {
-    const rawBody = await getRawBody(req);
+    // 🎯 Checkout completed → upgrade plan
+    if (event.type === "checkout.session.completed") {
+      const session = event.data.object as Stripe.Checkout.Session;
 
-    const event = stripe.webhooks.constructEvent(
-      rawBody,
-      signature,
-      process.env.STRIPE_WEBHOOK_SECRET as string
-    );
+      const customerEmail = session.customer_email;
+      const priceId =
+        session?.line_items?.data?.[0]?.price?.id ||
+        (session.metadata?.price_id as string);
 
-    switch (event.type) {
-      case "checkout.session.completed": {
-        const session = event.data.object as Stripe.Checkout.Session;
-
-        const accountId = session.metadata?.account_id;
-        const userId = session.metadata?.user_id;
-        const plan = session.metadata?.plan;
-
-        if (!accountId || !userId || !plan) {
-          throw new Error("Missing account_id, user_id, or plan in Checkout Session metadata.");
-        }
-
-        await activatePlan({
-          accountId,
-          userId,
-          plan,
-          stripeCustomerId: typeof session.customer === "string" ? session.customer : null,
-          stripeSubscriptionId:
-            typeof session.subscription === "string" ? session.subscription : null,
-        });
-
-        break;
+      if (!customerEmail || !priceId) {
+        console.error("Missing email or price ID");
+        return res.status(400).send("Missing data");
       }
 
-      case "customer.subscription.deleted": {
-        const subscription = event.data.object as Stripe.Subscription;
+      const plan = getPlanFromPrice(priceId);
 
-        await downgradePlan({
-          stripeCustomerId:
-            typeof subscription.customer === "string" ? subscription.customer : null,
-          stripeSubscriptionId: subscription.id,
-        });
+      console.log("🔥 Upgrading:", customerEmail, "→", plan);
 
-        break;
+      // 🔍 Find user profile
+      const { data: profile } = await supabase
+        .from("profiles")
+        .select("*")
+        .eq("email", customerEmail)
+        .single();
+
+      if (!profile) {
+        console.error("Profile not found for email:", customerEmail);
+        return res.status(404).send("Profile not found");
       }
 
-      case "customer.subscription.updated": {
-        // Keep for future handling of pauses, past_due, cancellations, etc.
-        break;
-      }
+      // ✅ Update profile
+      await supabase
+        .from("profiles")
+        .update({ plan })
+        .eq("id", profile.id);
 
-      default:
-        break;
+      // ✅ Update account
+      await supabase
+        .from("accounts")
+        .update({ plan })
+        .eq("id", profile.account_id);
+    }
+
+    // 🔄 Subscription updated
+    if (event.type === "customer.subscription.updated") {
+      console.log("Subscription updated");
+    }
+
+    // ❌ Subscription canceled
+    if (event.type === "customer.subscription.deleted") {
+      console.log("Subscription canceled");
     }
 
     return res.status(200).json({ received: true });
-  } catch (err: any) {
-    return res.status(400).send(`Webhook error: ${err.message}`);
+  } catch (error: any) {
+    console.error("Webhook handler error:", error);
+    return res.status(500).send("Server error");
   }
 }
