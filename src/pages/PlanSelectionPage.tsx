@@ -51,60 +51,6 @@ export default function PlanSelectionPage() {
 
   const canSubmit = useMemo(() => farmName.trim().length > 0, [farmName]);
 
-  async function getOrCreateAccountForPlan(
-    userId: string,
-    email: string,
-    farm: string,
-    plan: PlanKey
-  ) {
-    const { data: existingProfile, error: profileLookupErr } = await supabase
-      .from("profiles")
-      .select("id, account_id, email, role, plan")
-      .eq("id", userId)
-      .maybeSingle();
-
-    if (profileLookupErr) throw profileLookupErr;
-
-    let accountId = existingProfile?.account_id ?? null;
-
-    if (!accountId) {
-      accountId = crypto.randomUUID();
-
-      const { error: accountInsertErr } = await supabase.from("accounts").insert({
-        id: accountId,
-        name: farm,
-        plan, // use selected plan immediately
-      });
-
-      if (accountInsertErr) throw accountInsertErr;
-    } else {
-      const { error: accountUpdateErr } = await supabase
-        .from("accounts")
-        .update({
-          name: farm,
-          plan, // keep selected plan aligned
-        })
-        .eq("id", accountId);
-
-      if (accountUpdateErr) throw accountUpdateErr;
-    }
-
-    const { error: profileUpsertErr } = await supabase.from("profiles").upsert(
-      {
-        id: userId,
-        email: email || null,
-        account_id: accountId,
-        role: "admin",
-        plan, // use selected plan immediately
-      },
-      { onConflict: "id" }
-    );
-
-    if (profileUpsertErr) throw profileUpsertErr;
-
-    return accountId;
-  }
-
   async function handleChoosePlan(plan: PlanKey) {
     setErr(null);
     setMsg(null);
@@ -130,12 +76,7 @@ export default function PlanSelectionPage() {
       const cleanEmail = user.email?.trim().toLowerCase() ?? "";
       const cleanFarmName = farmName.trim();
 
-      const accountId = await getOrCreateAccountForPlan(
-        user.id,
-        cleanEmail,
-        cleanFarmName,
-        plan
-      );
+      setMsg("Redirecting to secure checkout...");
 
       const resp = await fetch("/api/create-checkout-session", {
         method: "POST",
@@ -144,13 +85,22 @@ export default function PlanSelectionPage() {
         },
         body: JSON.stringify({
           plan,
-          accountId,
           userId: user.id,
           email: cleanEmail,
+          farmName: cleanFarmName,
         }),
       });
 
-      const data = await resp.json();
+      const raw = await resp.text();
+
+      let data: any = {};
+      try {
+        data = raw ? JSON.parse(raw) : {};
+      } catch {
+        throw new Error(
+          `Checkout endpoint returned invalid JSON: ${raw.slice(0, 200)}`
+        );
+      }
 
       if (!resp.ok) {
         throw new Error(data.error || "Could not start checkout.");
@@ -160,9 +110,9 @@ export default function PlanSelectionPage() {
         throw new Error("Stripe Checkout URL was not returned.");
       }
 
-      setMsg("Redirecting to secure checkout...");
       window.location.href = data.url;
     } catch (e: any) {
+      setMsg(null);
       setErr(e?.message ?? "Could not start checkout.");
     } finally {
       setLoadingPlan(null);
@@ -216,6 +166,8 @@ export default function PlanSelectionPage() {
               border: "1px solid #fecaca",
               fontWeight: 700,
               marginBottom: 12,
+              whiteSpace: "pre-wrap",
+              wordBreak: "break-word",
             }}
           >
             {err}

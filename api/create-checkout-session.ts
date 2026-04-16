@@ -12,30 +12,37 @@ const PRICE_MAP: Record<string, string | undefined> = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  if (req.method !== "POST") {
-    return res.status(405).json({ error: "Method not allowed" });
-  }
-
   try {
+    if (req.method !== "POST") {
+      return res.status(405).json({ error: "Method not allowed" });
+    }
+
     const { plan, userId, email, farmName } = req.body ?? {};
 
     if (!plan || !userId || !email || !farmName) {
-      return res.status(400).json({ error: "Missing required fields." });
+      return res.status(400).json({
+        error: "Missing required fields.",
+        details: { plan, userId, email, farmName },
+      });
     }
 
     const price = PRICE_MAP[plan];
     if (!price) {
-      return res.status(400).json({ error: "Invalid plan." });
+      return res.status(400).json({
+        error: "Invalid or missing Stripe price for selected plan.",
+        details: { plan, price },
+      });
+    }
+
+    if (!process.env.APP_URL) {
+      return res.status(500).json({
+        error: "APP_URL is missing from environment variables.",
+      });
     }
 
     const session = await stripe.checkout.sessions.create({
       mode: "subscription",
-      line_items: [
-        {
-          price,
-          quantity: 1,
-        },
-      ],
+      line_items: [{ price, quantity: 1 }],
       success_url: `${process.env.APP_URL}/`,
       cancel_url: `${process.env.APP_URL}/choose-plan`,
       customer_email: email,
@@ -50,6 +57,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ url: session.url });
   } catch (err: any) {
-    return res.status(500).json({ error: err.message || "Server error" });
+    console.error("create-checkout-session error:", err);
+    return res.status(500).json({
+      error: err?.message || "Server error creating checkout session.",
+    });
   }
 }
