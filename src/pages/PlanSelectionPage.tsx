@@ -51,10 +51,15 @@ export default function PlanSelectionPage() {
 
   const canSubmit = useMemo(() => farmName.trim().length > 0, [farmName]);
 
-  async function getOrCreatePendingAccount(userId: string, email: string, farm: string) {
+  async function getOrCreateAccountForPlan(
+    userId: string,
+    email: string,
+    farm: string,
+    plan: PlanKey
+  ) {
     const { data: existingProfile, error: profileLookupErr } = await supabase
       .from("profiles")
-      .select("id, account_id")
+      .select("id, account_id, email, role, plan")
       .eq("id", userId)
       .maybeSingle();
 
@@ -68,7 +73,7 @@ export default function PlanSelectionPage() {
       const { error: accountInsertErr } = await supabase.from("accounts").insert({
         id: accountId,
         name: farm,
-        plan: "pending",
+        plan, // use selected plan immediately
       });
 
       if (accountInsertErr) throw accountInsertErr;
@@ -77,7 +82,7 @@ export default function PlanSelectionPage() {
         .from("accounts")
         .update({
           name: farm,
-          plan: "pending",
+          plan, // keep selected plan aligned
         })
         .eq("id", accountId);
 
@@ -90,7 +95,7 @@ export default function PlanSelectionPage() {
         email: email || null,
         account_id: accountId,
         role: "admin",
-        plan: "pending",
+        plan, // use selected plan immediately
       },
       { onConflict: "id" }
     );
@@ -125,10 +130,11 @@ export default function PlanSelectionPage() {
       const cleanEmail = user.email?.trim().toLowerCase() ?? "";
       const cleanFarmName = farmName.trim();
 
-      const accountId = await getOrCreatePendingAccount(
+      const accountId = await getOrCreateAccountForPlan(
         user.id,
         cleanEmail,
-        cleanFarmName
+        cleanFarmName,
+        plan
       );
 
       const resp = await fetch("/api/create-checkout-session", {
