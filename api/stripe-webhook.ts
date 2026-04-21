@@ -77,10 +77,8 @@ function mapVarietyRow(row: any, accountId: string) {
   };
 }
 
-async function seedSproutVarieties(accountId: string) {
-  if (await accountAlreadyHasVarieties(accountId)) return;
-
-  const { data: masterRows, error: masterErr } = await supabase
+async function fetchMasterLibrary(limit?: number, names?: readonly string[]) {
+  let query = supabase
     .from("varieties")
     .select(`
       variety,
@@ -102,67 +100,69 @@ async function seedSproutVarieties(accountId: string) {
       water_after_lights_on,
       water_per_day,
       has_lights_on_task,
-      default_pack_size_oz
-    `)
-    .eq("account_id", MASTER_ACCOUNT_ID)
-    .in("variety", [...SPROUT_VARIETY_NAMES])
-    .order("variety", { ascending: true });
-
-  if (masterErr) throw masterErr;
-
-  const rows = masterRows ?? [];
-  if (rows.length !== SPROUT_VARIETY_NAMES.length) {
-    throw new Error("Sprout starter library is incomplete in the master account.");
-  }
-
-  const inserts = rows.map((row: any) => mapVarietyRow(row, accountId));
-
-  const { error: insertErr } = await supabase.from("varieties").insert(inserts);
-  if (insertErr) throw insertErr;
-}
-
-async function seedFullLibrary(accountId: string) {
-  if (await accountAlreadyHasVarieties(accountId)) return;
-
-  const { data: masterRows, error: masterErr } = await supabase
-    .from("varieties")
-    .select(`
-      variety,
-      scientific_name,
-      seed_weight_g_1020,
-      soak_hours,
-      blackout_days,
-      harvest_days,
-      expected_yield_oz_1020,
-      difficulty,
-      pro_tips,
-      flavor_profile,
-      best_uses,
-      visual_notes,
-      chef_notes,
-      market_notes,
-      spray_per_day_blackout,
-      spray_during_blackout,
-      water_after_lights_on,
-      water_per_day,
-      has_lights_on_task,
-      default_pack_size_oz
+      default_pack_size_oz,
+      disabled_at
     `)
     .eq("account_id", MASTER_ACCOUNT_ID)
     .is("disabled_at", null)
     .order("variety", { ascending: true });
 
-  if (masterErr) throw masterErr;
+  if (names && names.length > 0) {
+    query = query.in("variety", [...names]);
+  }
 
-  const rows = masterRows ?? [];
+  if (typeof limit === "number") {
+    query = query.limit(limit);
+  }
+
+  const { data, error } = await query;
+  if (error) throw error;
+  return data ?? [];
+}
+
+async function seedSproutLibrary(accountId: string) {
+  if (await accountAlreadyHasVarieties(accountId)) return;
+
+  const rows = await fetchMasterLibrary(undefined, SPROUT_VARIETY_NAMES);
+
+  if (rows.length !== SPROUT_VARIETY_NAMES.length) {
+    throw new Error("Sprout starter library is incomplete in master account.");
+  }
+
+  const inserts = rows.map((row: any) => mapVarietyRow(row, accountId));
+
+  const { error } = await supabase.from("varieties").insert(inserts);
+  if (error) throw error;
+}
+
+async function seedFarmerLibrary(accountId: string) {
+  if (await accountAlreadyHasVarieties(accountId)) return;
+
+  const rows = await fetchMasterLibrary(35);
+
+  if (rows.length < 35) {
+    throw new Error("Master account does not contain enough active varieties for Farmer.");
+  }
+
+  const inserts = rows.map((row: any) => mapVarietyRow(row, accountId));
+
+  const { error } = await supabase.from("varieties").insert(inserts);
+  if (error) throw error;
+}
+
+async function seedCommercialLibrary(accountId: string) {
+  if (await accountAlreadyHasVarieties(accountId)) return;
+
+  const rows = await fetchMasterLibrary();
+
   if (!rows.length) {
     throw new Error("Master variety library is empty.");
   }
 
   const inserts = rows.map((row: any) => mapVarietyRow(row, accountId));
 
-  const { error: insertErr } = await supabase.from("varieties").insert(inserts);
-  if (insertErr) throw insertErr;
+  const { error } = await supabase.from("varieties").insert(inserts);
+  if (error) throw error;
 }
 
 async function upsertPaidAccountAndProfile(opts: {
@@ -218,9 +218,11 @@ async function upsertPaidAccountAndProfile(opts: {
   if (profileUpdateErr) throw profileUpdateErr;
 
   if (plan === "sprout") {
-    await seedSproutVarieties(accountId);
-  } else if (plan === "farmer" || plan === "commercial") {
-    await seedFullLibrary(accountId);
+    await seedSproutLibrary(accountId);
+  } else if (plan === "farmer") {
+    await seedFarmerLibrary(accountId);
+  } else if (plan === "commercial") {
+    await seedCommercialLibrary(accountId);
   }
 
   return accountId;
