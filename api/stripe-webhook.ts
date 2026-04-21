@@ -40,14 +40,45 @@ async function getRawBody(req: VercelRequest): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
-async function seedSproutVarieties(accountId: string) {
-  const { data: existingRows, error: existingErr, count } = await supabase
+async function accountAlreadyHasVarieties(accountId: string) {
+  const { count, error } = await supabase
     .from("varieties")
     .select("id", { head: true, count: "exact" })
     .eq("account_id", accountId);
 
-  if (existingErr) throw existingErr;
-  if ((count ?? 0) > 0) return;
+  if (error) throw error;
+  return (count ?? 0) > 0;
+}
+
+function mapVarietyRow(row: any, accountId: string) {
+  return {
+    variety: row.variety,
+    scientific_name: row.scientific_name,
+    seed_weight_g_1020: row.seed_weight_g_1020,
+    soak_hours: row.soak_hours,
+    blackout_days: row.blackout_days,
+    harvest_days: row.harvest_days,
+    expected_yield_oz_1020: row.expected_yield_oz_1020,
+    difficulty: row.difficulty,
+    pro_tips: row.pro_tips,
+    flavor_profile: row.flavor_profile,
+    best_uses: row.best_uses,
+    visual_notes: row.visual_notes,
+    chef_notes: row.chef_notes,
+    market_notes: row.market_notes,
+    spray_per_day_blackout: row.spray_per_day_blackout,
+    spray_during_blackout: row.spray_during_blackout,
+    water_after_lights_on: row.water_after_lights_on,
+    water_per_day: row.water_per_day,
+    has_lights_on_task: row.has_lights_on_task,
+    default_pack_size_oz: row.default_pack_size_oz,
+    account_id: accountId,
+    disabled_at: null,
+  };
+}
+
+async function seedSproutVarieties(accountId: string) {
+  if (await accountAlreadyHasVarieties(accountId)) return;
 
   const { data: masterRows, error: masterErr } = await supabase
     .from("varieties")
@@ -84,30 +115,51 @@ async function seedSproutVarieties(accountId: string) {
     throw new Error("Sprout starter library is incomplete in the master account.");
   }
 
-  const inserts = rows.map((row: any) => ({
-    variety: row.variety,
-    scientific_name: row.scientific_name,
-    seed_weight_g_1020: row.seed_weight_g_1020,
-    soak_hours: row.soak_hours,
-    blackout_days: row.blackout_days,
-    harvest_days: row.harvest_days,
-    expected_yield_oz_1020: row.expected_yield_oz_1020,
-    difficulty: row.difficulty,
-    pro_tips: row.pro_tips,
-    flavor_profile: row.flavor_profile,
-    best_uses: row.best_uses,
-    visual_notes: row.visual_notes,
-    chef_notes: row.chef_notes,
-    market_notes: row.market_notes,
-    spray_per_day_blackout: row.spray_per_day_blackout,
-    spray_during_blackout: row.spray_during_blackout,
-    water_after_lights_on: row.water_after_lights_on,
-    water_per_day: row.water_per_day,
-    has_lights_on_task: row.has_lights_on_task,
-    default_pack_size_oz: row.default_pack_size_oz,
-    account_id: accountId,
-    disabled_at: null,
-  }));
+  const inserts = rows.map((row: any) => mapVarietyRow(row, accountId));
+
+  const { error: insertErr } = await supabase.from("varieties").insert(inserts);
+  if (insertErr) throw insertErr;
+}
+
+async function seedFullLibrary(accountId: string) {
+  if (await accountAlreadyHasVarieties(accountId)) return;
+
+  const { data: masterRows, error: masterErr } = await supabase
+    .from("varieties")
+    .select(`
+      variety,
+      scientific_name,
+      seed_weight_g_1020,
+      soak_hours,
+      blackout_days,
+      harvest_days,
+      expected_yield_oz_1020,
+      difficulty,
+      pro_tips,
+      flavor_profile,
+      best_uses,
+      visual_notes,
+      chef_notes,
+      market_notes,
+      spray_per_day_blackout,
+      spray_during_blackout,
+      water_after_lights_on,
+      water_per_day,
+      has_lights_on_task,
+      default_pack_size_oz
+    `)
+    .eq("account_id", MASTER_ACCOUNT_ID)
+    .is("disabled_at", null)
+    .order("variety", { ascending: true });
+
+  if (masterErr) throw masterErr;
+
+  const rows = masterRows ?? [];
+  if (!rows.length) {
+    throw new Error("Master variety library is empty.");
+  }
+
+  const inserts = rows.map((row: any) => mapVarietyRow(row, accountId));
 
   const { error: insertErr } = await supabase.from("varieties").insert(inserts);
   if (insertErr) throw insertErr;
@@ -167,6 +219,8 @@ async function upsertPaidAccountAndProfile(opts: {
 
   if (plan === "sprout") {
     await seedSproutVarieties(accountId);
+  } else if (plan === "farmer" || plan === "commercial") {
+    await seedFullLibrary(accountId);
   }
 
   return accountId;
