@@ -41,41 +41,47 @@ async function getRawBody(req: VercelRequest): Promise<Buffer> {
 }
 
 async function seedSproutVarieties(accountId: string) {
-  const { data: masterRows, error: fetchErr } = await supabase
+  const { data: existingRows, error: existingErr, count } = await supabase
     .from("varieties")
-    .select(
-      `
-        variety,
-        scientific_name,
-        seed_weight_g_1020,
-        soak_hours,
-        blackout_days,
-        harvest_days,
-        expected_yield_oz_1020,
-        difficulty,
-        pro_tips,
-        flavor_profile,
-        best_uses,
-        visual_notes,
-        chef_notes,
-        market_notes,
-        spray_per_day_blackout,
-        spray_during_blackout,
-        water_after_lights_on,
-        water_per_day,
-        has_lights_on_task,
-        default_pack_size_oz
-      `
-    )
+    .select("id", { head: true, count: "exact" })
+    .eq("account_id", accountId);
+
+  if (existingErr) throw existingErr;
+  if ((count ?? 0) > 0) return;
+
+  const { data: masterRows, error: masterErr } = await supabase
+    .from("varieties")
+    .select(`
+      variety,
+      scientific_name,
+      seed_weight_g_1020,
+      soak_hours,
+      blackout_days,
+      harvest_days,
+      expected_yield_oz_1020,
+      difficulty,
+      pro_tips,
+      flavor_profile,
+      best_uses,
+      visual_notes,
+      chef_notes,
+      market_notes,
+      spray_per_day_blackout,
+      spray_during_blackout,
+      water_after_lights_on,
+      water_per_day,
+      has_lights_on_task,
+      default_pack_size_oz
+    `)
     .eq("account_id", MASTER_ACCOUNT_ID)
     .in("variety", [...SPROUT_VARIETY_NAMES])
     .order("variety", { ascending: true });
 
-  if (fetchErr) throw fetchErr;
+  if (masterErr) throw masterErr;
 
   const rows = masterRows ?? [];
   if (rows.length !== SPROUT_VARIETY_NAMES.length) {
-    throw new Error("Sprout starter library is incomplete in master account.");
+    throw new Error("Sprout starter library is incomplete in the master account.");
   }
 
   const inserts = rows.map((row: any) => ({
@@ -107,7 +113,7 @@ async function seedSproutVarieties(accountId: string) {
   if (insertErr) throw insertErr;
 }
 
-async function provisionPaidAccount(opts: {
+async function upsertPaidAccountAndProfile(opts: {
   userId: string;
   email: string;
   farmName: string;
@@ -117,7 +123,7 @@ async function provisionPaidAccount(opts: {
 
   const { data: existingProfile, error: profileLookupErr } = await supabase
     .from("profiles")
-    .select("id, account_id")
+    .select("id, email, account_id, role, plan")
     .eq("id", userId)
     .maybeSingle();
 
@@ -147,31 +153,23 @@ async function provisionPaidAccount(opts: {
     if (accountUpdateErr) throw accountUpdateErr;
   }
 
-  const { error: profileUpsertErr } = await supabase.from("profiles").upsert(
-    {
-      id: userId,
+  const { error: profileUpdateErr } = await supabase
+    .from("profiles")
+    .update({
       email,
       account_id: accountId,
       role: "admin",
       plan,
-    },
-    { onConflict: "id" }
-  );
+    })
+    .eq("id", userId);
 
-  if (profileUpsertErr) throw profileUpsertErr;
+  if (profileUpdateErr) throw profileUpdateErr;
 
   if (plan === "sprout") {
-    const { count, error: countErr } = await supabase
-      .from("varieties")
-      .select("*", { count: "exact", head: true })
-      .eq("account_id", accountId);
-
-    if (countErr) throw countErr;
-
-    if ((count ?? 0) === 0) {
-      await seedSproutVarieties(accountId);
-    }
+    await seedSproutVarieties(accountId);
   }
+
+  return accountId;
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -203,10 +201,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const plan = session.metadata?.plan;
 
         if (!userId || !email || !farmName || !plan) {
-          throw new Error("Missing metadata for provisioning.");
+          throw new Error("Missing required metadata for paid account provisioning.");
         }
 
-        await provisionPaidAccount({
+        await upsertPaidAccountAndProfile({
           userId,
           email,
           farmName,
@@ -224,6 +222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     return res.status(200).json({ received: true });
   } catch (err: any) {
+    console.error("stripe-webhook error:", err);
     return res.status(400).send(`Webhook error: ${err.message}`);
   }
 }

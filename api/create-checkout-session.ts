@@ -26,17 +26,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       });
     }
 
-    const price = PRICE_MAP[plan];
-    if (!price) {
-      return res.status(400).json({
-        error: "Invalid or missing Stripe price for selected plan.",
-        details: { plan, price },
-      });
+    if (!process.env.STRIPE_SECRET_KEY) {
+      return res.status(500).json({ error: "Missing STRIPE_SECRET_KEY in Vercel." });
     }
 
     if (!process.env.APP_URL) {
-      return res.status(500).json({
-        error: "APP_URL is missing from environment variables.",
+      return res.status(500).json({ error: "Missing APP_URL in Vercel." });
+    }
+
+    const price = PRICE_MAP[plan];
+    if (!price) {
+      return res.status(400).json({
+        error: `Missing Stripe price for plan "${plan}".`,
+      });
+    }
+
+    if (!price.startsWith("price_")) {
+      return res.status(400).json({
+        error: `Stripe price for "${plan}" is invalid. Expected value starting with price_. Got: ${price}`,
       });
     }
 
