@@ -1,5 +1,5 @@
 // src/pages/NewOrderPage.tsx
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { supabase } from "../utils/supabaseClient";
 
@@ -14,7 +14,6 @@ type ProfileRow = {
 type CustomerRow = {
   id: string;
   name: string | null;
-  business_name?: string | null;
 };
 
 type VarietyRow = {
@@ -45,16 +44,13 @@ export default function NewOrderPage() {
   const [customers, setCustomers] = useState<CustomerRow[]>([]);
   const [varieties, setVarieties] = useState<VarietyRow[]>([]);
 
-  const [customerMode, setCustomerMode] = useState<"existing" | "new">("new");
+  const [customerMode, setCustomerMode] = useState<"new" | "existing">("new");
   const [selectedCustomerId, setSelectedCustomerId] = useState("");
   const [newCustomerName, setNewCustomerName] = useState("");
   const [deliveryDate, setDeliveryDate] = useState(todayPlus(7));
   const [status, setStatus] = useState("confirmed");
   const [notes, setNotes] = useState("");
-
-  const [lines, setLines] = useState<OrderLine[]>([
-    { varietyId: "", quantity: "1" },
-  ]);
+  const [lines, setLines] = useState<OrderLine[]>([{ varietyId: "", quantity: "1" }]);
 
   useEffect(() => {
     void loadPage();
@@ -80,24 +76,20 @@ export default function NewOrderPage() {
         .single();
 
       if (profileErr) throw profileErr;
+      if (!profileRow?.account_id) throw new Error("No account is linked to this user.");
 
-      const typedProfile = profileRow as ProfileRow;
-      setProfile(typedProfile);
-
-      if (!typedProfile.account_id) {
-        throw new Error("No account is linked to this user yet.");
-      }
+      setProfile(profileRow as ProfileRow);
 
       const [customersRes, varietiesRes] = await Promise.all([
         supabase
           .from("customers")
-          .select("id, name, business_name")
-          .eq("account_id", typedProfile.account_id)
+          .select("id, name")
+          .eq("account_id", profileRow.account_id)
           .order("name", { ascending: true }),
         supabase
           .from("varieties")
           .select("id, variety, harvest_days")
-          .eq("account_id", typedProfile.account_id)
+          .eq("account_id", profileRow.account_id)
           .is("disabled_at", null)
           .order("variety", { ascending: true }),
       ]);
@@ -126,22 +118,12 @@ export default function NewOrderPage() {
     }
   }
 
-  const selectedCustomerName = useMemo(() => {
-    const c = customers.find((x) => x.id === selectedCustomerId);
-    return c?.business_name || c?.name || "";
-  }, [customers, selectedCustomerId]);
-
   function updateLine(index: number, patch: Partial<OrderLine>) {
-    setLines((prev) =>
-      prev.map((line, i) => (i === index ? { ...line, ...patch } : line))
-    );
+    setLines((prev) => prev.map((line, i) => (i === index ? { ...line, ...patch } : line)));
   }
 
   function addLine() {
-    setLines((prev) => [
-      ...prev,
-      { varietyId: varieties[0]?.id ?? "", quantity: "1" },
-    ]);
+    setLines((prev) => [...prev, { varietyId: varieties[0]?.id ?? "", quantity: "1" }]);
   }
 
   function removeLine(index: number) {
@@ -178,11 +160,6 @@ export default function NewOrderPage() {
       return;
     }
 
-    if (!deliveryDate) {
-      setError("Please choose a delivery date.");
-      return;
-    }
-
     const validLines = lines
       .map((line) => ({
         variety_id: line.varietyId,
@@ -190,8 +167,13 @@ export default function NewOrderPage() {
       }))
       .filter((line) => line.variety_id && line.quantity > 0);
 
+    if (!deliveryDate) {
+      setError("Please choose a delivery date.");
+      return;
+    }
+
     if (validLines.length === 0) {
-      setError("Please add at least one order line.");
+      setError("Please add at least one variety.");
       return;
     }
 
@@ -212,7 +194,6 @@ export default function NewOrderPage() {
       }));
 
       const { error: insertErr } = await supabase.from("orders").insert(rows);
-
       if (insertErr) throw insertErr;
 
       navigate("/orders");
@@ -252,7 +233,7 @@ export default function NewOrderPage() {
 
         {varieties.length === 0 ? (
           <div style={emptyBox}>
-            No enabled varieties exist for this account. Add or seed varieties first.
+            No enabled varieties exist for this account. This means the plan library was not seeded for this user.
           </div>
         ) : (
           <form onSubmit={handleCreateOrder} style={{ display: "grid", gap: 16 }}>
@@ -267,6 +248,7 @@ export default function NewOrderPage() {
                 >
                   New Customer
                 </button>
+
                 <button
                   type="button"
                   disabled={customers.length === 0}
@@ -297,17 +279,11 @@ export default function NewOrderPage() {
                   >
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.business_name || c.name}
+                        {c.name}
                       </option>
                     ))}
                   </select>
                 </label>
-              )}
-
-              {customerMode === "existing" && selectedCustomerName && (
-                <div style={{ color: "#64748b", fontSize: 13 }}>
-                  Selected: {selectedCustomerName}
-                </div>
               )}
             </section>
 
@@ -451,7 +427,6 @@ const section: React.CSSProperties = {
   padding: 14,
   border: "1px solid #f1f5f9",
   borderRadius: 14,
-  background: "#ffffff",
 };
 
 const sectionTitle: React.CSSProperties = {
