@@ -26,15 +26,11 @@ type TaskType =
   | "other";
 
 function cleanTitle(title: string) {
-  return (title ?? "")
-    .replace(/^sys:detail:/i, "")
-    .replace(/^sys:/i, "")
-    .trim();
+  return (title ?? "").replace(/^sys:detail:/i, "").replace(/^sys:/i, "").trim();
 }
 
 function detectType(title: string): TaskType {
   const s = cleanTitle(title).toLowerCase();
-
   if (s.startsWith("soak")) return "soak";
   if (s.startsWith("sow")) return "sow";
   if (s.startsWith("spray")) return "spray";
@@ -42,12 +38,11 @@ function detectType(title: string): TaskType {
   if (s.startsWith("water")) return "water";
   if (s.startsWith("harvest")) return "harvest";
   if (s.startsWith("deliver")) return "delivery";
-
   return "other";
 }
 
 function typeLabel(type: TaskType) {
-  const labels: Record<TaskType, string> = {
+  return {
     soak: "Soak",
     sow: "Sow",
     spray: "Spray",
@@ -56,31 +51,11 @@ function typeLabel(type: TaskType) {
     harvest: "Harvest",
     delivery: "Deliver",
     other: "Other",
-  };
-
-  return labels[type];
-}
-
-function typeOrder(type: TaskType) {
-  const order: Record<TaskType, number> = {
-    soak: 0,
-    sow: 1,
-    spray: 2,
-    lights_on: 3,
-    water: 4,
-    harvest: 5,
-    delivery: 6,
-    other: 99,
-  };
-
-  return order[type];
+  }[type];
 }
 
 function toYMD(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, "0");
-  const dd = String(d.getDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return d.toISOString().slice(0, 10);
 }
 
 function addDaysYMD(ymd: string, days: number) {
@@ -90,22 +65,18 @@ function addDaysYMD(ymd: string, days: number) {
 }
 
 async function getCurrentAccountId() {
-  const {
-    data: { user },
-    error: userErr,
-  } = await supabase.auth.getUser();
-
+  const { data: { user }, error: userErr } = await supabase.auth.getUser();
   if (userErr) throw userErr;
   if (!user) throw new Error("No signed-in user found.");
 
-  const { data: profile, error: profileErr } = await supabase
+  const { data: profile, error } = await supabase
     .from("profiles")
     .select("account_id")
     .eq("id", user.id)
     .single();
 
-  if (profileErr) throw profileErr;
-  if (!profile?.account_id) throw new Error("No account is linked to this user.");
+  if (error) throw error;
+  if (!profile?.account_id) throw new Error("No account linked to this user.");
 
   return profile.account_id as string;
 }
@@ -122,9 +93,7 @@ export default function TasksPage() {
   const [query, setQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState<TaskType | "all">("all");
   const [statusFilter, setStatusFilter] = useState<TaskStatus | "all">("open");
-  const [dateFilter, setDateFilter] = useState<
-    "overdue" | "today" | "tomorrow" | "next7" | "all"
-  >("today");
+  const [dateFilter, setDateFilter] = useState<"overdue" | "today" | "tomorrow" | "next7" | "all">("today");
   const [pinnedDate, setPinnedDate] = useState<string | null>(null);
 
   const todayYMD = useMemo(() => toYMD(new Date()), []);
@@ -146,22 +115,17 @@ export default function TasksPage() {
       .from("tasks")
       .select("*")
       .eq("account_id", accountId)
-      .order("dueDate", { ascending: true })
+      .order("due_date", { ascending: true })
       .order("title", { ascending: true });
 
     if (error) throw error;
 
-    const sorted = ((data ?? []) as TaskRow[]).sort((a, b) => {
-      const dateSort = a.dueDate.localeCompare(b.dueDate);
-      if (dateSort !== 0) return dateSort;
+    const normalized = (data ?? []).map((t: any) => ({
+      ...t,
+      dueDate: t.due_date ?? t.dueDate,
+    }));
 
-      const typeSort = typeOrder(detectType(a.title)) - typeOrder(detectType(b.title));
-      if (typeSort !== 0) return typeSort;
-
-      return cleanTitle(a.title).localeCompare(cleanTitle(b.title));
-    });
-
-    setTasks(sorted);
+    setTasks(normalized as TaskRow[]);
   }
 
   useEffect(() => {
@@ -169,12 +133,7 @@ export default function TasksPage() {
     const date = sp.get("date");
     const phase = sp.get("phase");
 
-    if (date) {
-      setPinnedDate(date);
-      setDateFilter("all");
-    } else {
-      setPinnedDate(null);
-    }
+    setPinnedDate(date);
 
     if (phase) {
       const clean = phase === "deliver" ? "delivery" : phase;
@@ -215,45 +174,6 @@ export default function TasksPage() {
     };
   }, [location.key]);
 
-  const counts = useMemo(() => {
-    const base = {
-      overdue: 0,
-      today: 0,
-      tomorrow: 0,
-      next7: 0,
-      all: 0,
-      type: {
-        all: 0,
-        soak: 0,
-        sow: 0,
-        spray: 0,
-        lights_on: 0,
-        water: 0,
-        harvest: 0,
-        delivery: 0,
-        other: 0,
-      } as Record<TaskType | "all", number>,
-    };
-
-    for (const t of tasks) {
-      if (isDone(t)) continue;
-      if (pinnedDate && t.dueDate !== pinnedDate) continue;
-
-      const type = detectType(t.title);
-
-      base.all++;
-      base.type.all++;
-      base.type[type]++;
-
-      if (isOverdue(t)) base.overdue++;
-      if (t.dueDate === todayYMD) base.today++;
-      if (t.dueDate === tomorrowYMD) base.tomorrow++;
-      if (t.dueDate >= todayYMD && t.dueDate <= next7EndYMD) base.next7++;
-    }
-
-    return base;
-  }, [tasks, pinnedDate, todayYMD, tomorrowYMD, next7EndYMD]);
-
   const filteredTasks = useMemo(() => {
     const q = query.trim().toLowerCase();
 
@@ -266,39 +186,22 @@ export default function TasksPage() {
         if (dateFilter === "overdue" && !isOverdue(t)) return false;
         if (dateFilter === "today" && t.dueDate !== todayYMD) return false;
         if (dateFilter === "tomorrow" && t.dueDate !== tomorrowYMD) return false;
-        if (dateFilter === "next7" && !(t.dueDate >= todayYMD && t.dueDate <= next7EndYMD)) {
-          return false;
-        }
+        if (dateFilter === "next7" && !(t.dueDate >= todayYMD && t.dueDate <= next7EndYMD)) return false;
       }
 
       if (typeFilter !== "all" && type !== typeFilter) return false;
-
       if (statusFilter === "open" && isDone(t)) return false;
       if (statusFilter === "done" && !isDone(t)) return false;
 
-      if (q) {
-        const hay = `${t.title ?? ""} ${t.notes ?? ""}`.toLowerCase();
-        if (!hay.includes(q)) return false;
-      }
+      if (q && !`${t.title ?? ""} ${t.notes ?? ""}`.toLowerCase().includes(q)) return false;
 
       return true;
     });
-  }, [
-    tasks,
-    query,
-    typeFilter,
-    statusFilter,
-    dateFilter,
-    pinnedDate,
-    todayYMD,
-    tomorrowYMD,
-    next7EndYMD,
-  ]);
+  }, [tasks, query, typeFilter, statusFilter, dateFilter, pinnedDate, todayYMD, tomorrowYMD, next7EndYMD]);
 
   async function setTaskStatus(task: TaskRow, nextStatus: TaskStatus) {
     try {
       setSavingId(task.id);
-
       const accountId = await getCurrentAccountId();
 
       const { error } = await supabase
@@ -308,7 +211,6 @@ export default function TasksPage() {
         .eq("account_id", accountId);
 
       if (error) throw error;
-
       await loadTasks();
     } catch (e: any) {
       alert(e?.message ?? "Failed to update task.");
@@ -326,147 +228,59 @@ export default function TasksPage() {
     navigate("/tasks");
   }
 
-  if (loading) {
-    return (
-      <div className="page">
-        <h1 className="page-title">Tasks</h1>
-        <p className="page-text">Loading…</p>
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="page">
-        <h1 className="page-title">Tasks</h1>
-        <p className="page-text" style={{ color: "#b91c1c" }}>
-          {error}
-        </p>
-      </div>
-    );
-  }
-
-  const heading = pinnedDate
-    ? `Tasks for ${formatDisplayDate(pinnedDate)}`
-    : dateFilter === "overdue"
-    ? `Overdue (${filteredTasks.length})`
-    : dateFilter === "today"
-    ? `Due Today (${filteredTasks.length})`
-    : dateFilter === "tomorrow"
-    ? `Due Tomorrow (${filteredTasks.length})`
-    : dateFilter === "next7"
-    ? `Next 7 Days (${filteredTasks.length})`
-    : `All Tasks (${filteredTasks.length})`;
+  if (loading) return <div className="page"><h1 className="page-title">Tasks</h1><p>Loading…</p></div>;
+  if (error) return <div className="page"><h1 className="page-title">Tasks</h1><p style={{ color: "#b91c1c" }}>{error}</p></div>;
 
   return (
     <div className="page">
       <h1 className="page-title">Tasks</h1>
 
       <div style={card}>
-        <h2 style={sectionTitle}>Today’s Do Now</h2>
+        <h2>Today’s Do Now</h2>
 
         <div style={pillWrap}>
-          <button style={dateFilter === "overdue" ? activePill : pill} onClick={() => setDateFilter("overdue")}>
-            Overdue <span style={countBadge}>{counts.overdue}</span>
-          </button>
-          <button style={dateFilter === "today" ? activePill : pill} onClick={() => setDateFilter("today")}>
-            Due today <span style={countBadge}>{counts.today}</span>
-          </button>
-          <button style={dateFilter === "tomorrow" ? activePill : pill} onClick={() => setDateFilter("tomorrow")}>
-            Due tomorrow <span style={countBadge}>{counts.tomorrow}</span>
-          </button>
-          <button style={dateFilter === "next7" ? activePill : pill} onClick={() => setDateFilter("next7")}>
-            Next 7 days <span style={countBadge}>{counts.next7}</span>
-          </button>
-          <button style={dateFilter === "all" ? activePill : pill} onClick={() => setDateFilter("all")}>
-            All dates <span style={countBadge}>{counts.all}</span>
-          </button>
+          {["overdue", "today", "tomorrow", "next7", "all"].map((f) => (
+            <button key={f} style={dateFilter === f ? activePill : pill} onClick={() => setDateFilter(f as any)}>
+              {f}
+            </button>
+          ))}
         </div>
 
-        <div style={toolbar}>
-          <input
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search tasks..."
-            style={input}
-          />
-
-          <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as any)}
-            style={select}
-          >
-            <option value="open">Open tasks</option>
-            <option value="done">Done tasks</option>
-            <option value="all">All statuses</option>
-          </select>
-        </div>
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search tasks..." style={input} />
 
         <div style={pillWrap}>
-          {(["all", "soak", "sow", "spray", "lights_on", "water", "harvest", "delivery"] as Array<TaskType | "all">).map(
-            (type) => (
-              <button
-                key={type}
-                style={typeFilter === type ? activePill : pill}
-                onClick={() => setTypeFilter(type)}
-              >
-                {type === "all" ? "All" : typeLabel(type)}
-                <span style={countBadge}>{counts.type[type]}</span>
-              </button>
-            )
-          )}
+          {(["all", "soak", "sow", "spray", "lights_on", "water", "harvest", "delivery"] as Array<TaskType | "all">).map((type) => (
+            <button key={type} style={typeFilter === type ? activePill : pill} onClick={() => setTypeFilter(type)}>
+              {type === "all" ? "All" : typeLabel(type)}
+            </button>
+          ))}
         </div>
 
-        <button onClick={resetFilters} style={secondaryButton}>
-          Reset filters
-        </button>
+        <button onClick={resetFilters} style={secondaryButton}>Reset filters</button>
       </div>
 
-      <h2 style={{ marginTop: 24 }}>{heading}</h2>
+      <h2 style={{ marginTop: 24 }}>Tasks ({filteredTasks.length})</h2>
 
       {filteredTasks.length === 0 ? (
-        <p className="page-text">Nothing matches your filters.</p>
+        <p>Nothing matches your filters.</p>
       ) : (
         <div style={{ display: "grid", gap: 12 }}>
           {filteredTasks.map((task) => {
-            const type = detectType(task.title);
             const done = isDone(task);
-
             return (
               <div key={task.id} style={taskCard}>
                 <div>
-                  <div style={{ fontWeight: 900, fontSize: 18 }}>
-                    {typeLabel(type)}: {cleanTitle(task.title)}
-                  </div>
-
-                  <div style={{ color: "#64748b", marginTop: 4 }}>
-                    Due {formatDisplayDate(task.dueDate)}
-                  </div>
-
-                  {task.notes ? (
-                    <div style={{ color: "#475569", marginTop: 8 }}>{task.notes}</div>
-                  ) : null}
+                  <strong>{cleanTitle(task.title)}</strong>
+                  <div style={{ color: "#64748b" }}>Due {formatDisplayDate(task.dueDate)}</div>
                 </div>
 
-                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                  {done ? (
-                    <button
-                      disabled={savingId === task.id}
-                      onClick={() => setTaskStatus(task, "open")}
-                      style={secondaryButton}
-                    >
-                      Reopen
-                    </button>
-                  ) : (
-                    <button
-                      disabled={savingId === task.id}
-                      onClick={() => setTaskStatus(task, "done")}
-                      style={primaryButton}
-                    >
-                      Mark done
-                    </button>
-                  )}
-                </div>
+                <button
+                  disabled={savingId === task.id}
+                  onClick={() => setTaskStatus(task, done ? "open" : "done")}
+                  style={done ? secondaryButton : primaryButton}
+                >
+                  {done ? "Reopen" : "Mark done"}
+                </button>
               </div>
             );
           })}
@@ -483,13 +297,6 @@ const card: React.CSSProperties = {
   background: "#fff",
 };
 
-const sectionTitle: React.CSSProperties = {
-  marginTop: 0,
-  marginBottom: 14,
-  fontSize: 22,
-  fontWeight: 900,
-};
-
 const pillWrap: React.CSSProperties = {
   display: "flex",
   gap: 10,
@@ -502,7 +309,6 @@ const pill: React.CSSProperties = {
   borderRadius: 999,
   border: "1px solid #dbe3ef",
   background: "#fff",
-  color: "#0f172a",
   fontWeight: 900,
   cursor: "pointer",
 };
@@ -513,31 +319,13 @@ const activePill: React.CSSProperties = {
   color: "#fff",
 };
 
-const countBadge: React.CSSProperties = {
-  marginLeft: 8,
-  padding: "2px 9px",
-  borderRadius: 999,
-  background: "#f1f5f9",
-  color: "#0f172a",
-};
-
-const toolbar: React.CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "1fr 260px",
-  gap: 12,
-  marginBottom: 14,
-};
-
 const input: React.CSSProperties = {
+  width: "100%",
   padding: "12px 14px",
   borderRadius: 12,
   border: "1px solid #cbd5e1",
   fontSize: 16,
-};
-
-const select: React.CSSProperties = {
-  ...input,
-  background: "#fff",
+  marginBottom: 14,
 };
 
 const taskCard: React.CSSProperties = {
@@ -548,7 +336,6 @@ const taskCard: React.CSSProperties = {
   display: "flex",
   justifyContent: "space-between",
   gap: 14,
-  alignItems: "flex-start",
 };
 
 const primaryButton: React.CSSProperties = {
