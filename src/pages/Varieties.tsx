@@ -102,6 +102,7 @@ export default function VarietiesPage() {
   return (
     <div className="page">
       <h1 className="page-title">Varieties</h1>
+
       <p className="page-text" style={{ marginTop: -12 }}>
         {totalVarieties} active varieties
       </p>
@@ -117,8 +118,11 @@ export default function VarietiesPage() {
               <div style={headerRow}>
                 <div>
                   <h2 style={title}>{v.variety}</h2>
-                  <p style={subtitle}>{v.scientific_name || "Scientific name not listed"}</p>
+                  <p style={subtitle}>
+                    {v.scientific_name || "Scientific name not listed"}
+                  </p>
                 </div>
+
                 <span style={pill}>{v.difficulty || "Standard"}</span>
               </div>
 
