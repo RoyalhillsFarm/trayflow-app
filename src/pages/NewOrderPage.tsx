@@ -111,22 +111,18 @@ export default function NewOrderPage() {
       ? crypto.randomUUID()
       : `ln_${Date.now()}_${Math.random().toString(16).slice(2)}`;
 
-  const addLine = (seedFromFirst = true) => {
-    setLines((prev) => {
-      const first = prev[0];
-      const vId = seedFromFirst && first?.varietyId ? first.varietyId : varieties[0]?.id ?? "";
-      return [
-        ...prev,
-        {
-          id: makeId(),
-          varietyId: vId,
-          quantity: 1,
-          seedGramsPerTray: undefined,
-          packSize: "",
-          notes: "",
-        },
-      ];
-    });
+  const addLine = () => {
+    setLines((prev) => [
+      ...prev,
+      {
+        id: makeId(),
+        varietyId: varieties[0]?.id ?? "",
+        quantity: 1,
+        seedGramsPerTray: undefined,
+        packSize: "",
+        notes: "",
+      },
+    ]);
   };
 
   useEffect(() => {
@@ -362,8 +358,8 @@ export default function NewOrderPage() {
               <div style={helperText}>Total trays: {totalTrays}</div>
             </div>
 
-            <button type="button" onClick={() => addLine()} style={secondaryBtn}>
-              + Add Line
+            <button type="button" onClick={addLine} style={secondaryBtn}>
+              + Add Variety
             </button>
           </div>
 
@@ -466,7 +462,7 @@ export default function NewOrderPage() {
               <strong>Total trays:</strong> {totalTrays}
             </div>
             <div>
-              <strong>Lines:</strong> {lines.length}
+              <strong>Variety lines:</strong> {lines.length}
             </div>
           </div>
         </div>
@@ -484,134 +480,20 @@ export default function NewOrderPage() {
   );
 }
 
-const formWrap: CSSProperties = {
-  display: "grid",
-  gap: 16,
-  maxWidth: 1180,
-};
-
-const card: CSSProperties = {
-  border: "1px solid #e2e8f0",
-  borderRadius: 18,
-  padding: 18,
-  background: "#fff",
-};
-
-const cardHeader: CSSProperties = {
-  display: "flex",
-  justifyContent: "space-between",
-  gap: 12,
-  alignItems: "center",
-  marginBottom: 12,
-};
-
-const cardTitle: CSSProperties = {
-  margin: "0 0 12px",
-  fontSize: 22,
-  fontWeight: 900,
-  color: "#0f172a",
-};
-
-const label: CSSProperties = {
-  display: "grid",
-  gap: 6,
-  fontWeight: 800,
-  color: "#0f172a",
-};
-
-const input: CSSProperties = {
-  width: "100%",
-  padding: "11px 13px",
-  borderRadius: 12,
-  border: "1px solid #cbd5e1",
-  fontSize: 15,
-  boxSizing: "border-box",
-  background: "#fff",
-};
-
-const helperText: CSSProperties = {
-  fontSize: 13,
-  color: "#64748b",
-};
-
-const segmented: CSSProperties = {
-  display: "flex",
-  gap: 10,
-  flexWrap: "wrap",
-  marginBottom: 14,
-};
-
-const segment: CSSProperties = {
-  padding: "10px 14px",
-  borderRadius: 999,
-  border: "1px solid #cbd5e1",
-  background: "#fff",
-  cursor: "pointer",
-  fontWeight: 900,
-};
-
-const segmentActive: CSSProperties = {
-  ...segment,
-  background: "#047857",
-  color: "#fff",
-  border: "1px solid #047857",
-};
-
-const lineGrid: CSSProperties = {
-  display: "grid",
-  gridTemplateColumns: "minmax(220px, 1.6fr) 90px 120px 140px minmax(140px, 0.8fr) auto",
-  gap: 10,
-  alignItems: "end",
-  padding: 12,
-  borderRadius: 14,
-  border: "1px solid #e2e8f0",
-};
-
-const sowBox: CSSProperties = {
-  padding: "10px 12px",
-  borderRadius: 12,
-  border: "1px solid #e2e8f0",
-  background: "#f8fafc",
-};
-
-const summaryGrid: CSSProperties = {
-  display: "grid",
-  gap: 8,
-  color: "#0f172a",
-};
-
-const actions: CSSProperties = {
-  display: "flex",
-  justifyContent: "flex-end",
-  gap: 10,
-};
-
-const primaryBtn: CSSProperties = {
-  padding: "12px 18px",
-  borderRadius: 999,
-  border: "none",
-  background: "#047857",
-  color: "#fff",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const secondaryBtn: CSSProperties = {
-  padding: "12px 18px",
-  borderRadius: 999,
-  border: "1px solid #cbd5e1",
-  background: "#fff",
-  color: "#0f172a",
-  fontWeight: 900,
-  cursor: "pointer",
-};
-
-const dangerBtn: CSSProperties = {
-  padding: "11px 13px",
-  borderRadius: 999,
-  border: "none",
-  background: "#b91c1c",
-  color: "#fff",
-  fontWeight: 900,
-  cursor: "pointer",
-};
+const formWrap: CSSProperties = { display: "grid", gap: 16, maxWidth: 1180 };
+const card: CSSProperties = { border: "1px solid #e2e8f0", borderRadius: 18, padding: 18, background: "#fff" };
+const cardHeader: CSSProperties = { display: "flex", justifyContent: "space-between", gap: 12, alignItems: "center", marginBottom: 12 };
+const cardTitle: CSSProperties = { margin: "0 0 12px", fontSize: 22, fontWeight: 900, color: "#0f172a" };
+const label: CSSProperties = { display: "grid", gap: 6, fontWeight: 800, color: "#0f172a" };
+const input: CSSProperties = { width: "100%", padding: "11px 13px", borderRadius: 12, border: "1px solid #cbd5e1", fontSize: 15, boxSizing: "border-box", background: "#fff" };
+const helperText: CSSProperties = { fontSize: 13, color: "#64748b" };
+const segmented: CSSProperties = { display: "flex", gap: 10, flexWrap: "wrap", marginBottom: 14 };
+const segment: CSSProperties = { padding: "10px 14px", borderRadius: 999, border: "1px solid #cbd5e1", background: "#fff", cursor: "pointer", fontWeight: 900 };
+const segmentActive: CSSProperties = { ...segment, background: "#047857", color: "#fff", border: "1px solid #047857" };
+const lineGrid: CSSProperties = { display: "grid", gridTemplateColumns: "minmax(220px, 1.6fr) 90px 120px 140px minmax(140px, 0.8fr) auto", gap: 10, alignItems: "end", padding: 12, borderRadius: 14, border: "1px solid #e2e8f0" };
+const sowBox: CSSProperties = { padding: "10px 12px", borderRadius: 12, border: "1px solid #e2e8f0", background: "#f8fafc" };
+const summaryGrid: CSSProperties = { display: "grid", gap: 8, color: "#0f172a" };
+const actions: CSSProperties = { display: "flex", justifyContent: "flex-end", gap: 10 };
+const primaryBtn: CSSProperties = { padding: "12px 18px", borderRadius: 999, border: "none", background: "#047857", color: "#fff", fontWeight: 900, cursor: "pointer" };
+const secondaryBtn: CSSProperties = { padding: "12px 18px", borderRadius: 999, border: "1px solid #cbd5e1", background: "#fff", color: "#0f172a", fontWeight: 900, cursor: "pointer" };
+const dangerBtn: CSSProperties = { padding: "11px 13px", borderRadius: 999, border: "none", background: "#b91c1c", color: "#fff", fontWeight: 900, cursor: "pointer" };
