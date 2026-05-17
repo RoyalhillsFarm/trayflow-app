@@ -8,6 +8,7 @@ import type { Variety } from "../lib/storage";
 import {
   getCustomers as getCustomersSB,
   addOrder as addOrderSB,
+  syncPhaseTasksRange,
   type Customer,
   type OrderStatus,
 } from "../lib/supabaseStorage";
@@ -113,7 +114,6 @@ export default function NewOrderPage() {
 
   const addLine = () => {
     setLines((prev) => [
-      ...prev,
       {
         id: makeId(),
         varietyId: varieties[0]?.id ?? "",
@@ -122,6 +122,7 @@ export default function NewOrderPage() {
         packSize: "",
         notes: "",
       },
+      ...prev,
     ]);
   };
 
@@ -257,6 +258,9 @@ export default function NewOrderPage() {
           account_id: accountId,
         } as any);
       }
+
+      const today = toYMD(new Date());
+      await syncPhaseTasksRange(today, 45);
 
       navigate("/orders");
     } catch (e: any) {
@@ -472,7 +476,7 @@ export default function NewOrderPage() {
             Cancel
           </button>
           <button type="submit" disabled={submitting} style={primaryBtn}>
-            {submitting ? "Creating…" : "Create Order"}
+            {submitting ? "Creating Tasks…" : "Create Order"}
           </button>
         </div>
       </form>
