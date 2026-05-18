@@ -1,10 +1,4 @@
 // src/lib/supabaseStorage.ts
-// Supabase-backed data functions for TrayFlow (Customers, Orders, Tasks, Events, Varieties)
-//
-// Notes:
-// - Dates are stored as DATE in Supabase, but in the app we keep them as "YYYY-MM-DD" strings.
-// - This file exports BOTH the "plain" names and "*SB" aliases to avoid breaking imports.
-
 import { supabase } from "../utils/supabaseClient";
 
 /* ----------------- Types ----------------- */
@@ -14,24 +8,19 @@ export type StandingOrderItem = {
   dayOfWeek: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
   varietyId?: string;
   varietyName?: string;
-  quantity: number; // trays
-  packSize?: string; // e.g. "4oz clamshell"
+  quantity: number;
+  packSize?: string;
   notes?: string;
 };
 
 export type Customer = {
   id: string;
+  account_id?: string | null;
   name: string;
-
-  // legacy
   contact?: string;
-
-  // profile
   contactName?: string;
   email?: string;
   phone?: string;
-
-  // delivery
   addressLine1?: string;
   addressLine2?: string;
   city?: string;
@@ -40,14 +29,10 @@ export type Customer = {
   deliveryDays?: string[];
   deliveryWindow?: string;
   dropoffInstructions?: string;
-
-  // billing
   priceTier?: string;
   paymentTerms?: string;
   preferredPaymentMethod?: string;
   taxExempt?: boolean;
-
-  // ops
   packagingPrefs?: any;
   tags?: string[];
   standingOrders?: StandingOrderItem[];
@@ -55,23 +40,21 @@ export type Customer = {
   active?: boolean;
 };
 
-// ✅ Add packed
 export type OrderStatus = "draft" | "confirmed" | "packed" | "delivered";
 
 export type Order = {
   id: string;
+  account_id?: string | null;
   customerId: string;
   varietyId: string;
   quantity: number;
-  deliveryDate: string; // YYYY-MM-DD
+  deliveryDate: string;
   status: OrderStatus;
   created_at?: string;
 };
 
 export type TaskStatus = "planned" | "in_progress" | "ready" | "delivered" | "done";
 
-// Matches DB check constraint:
-// CHECK (task_type = ANY (ARRAY['sow','spray','water','blackout','lights_on','harvest','delivery','other']))
 export type TaskType =
   | "sow"
   | "spray"
@@ -84,13 +67,12 @@ export type TaskType =
 
 export type Task = {
   id: string;
+  account_id?: string | null;
   title: string;
-  dueDate: string; // YYYY-MM-DD
+  dueDate: string;
   status: TaskStatus;
   orderId?: string | null;
   created_at?: string;
-
-  // optional (exists in DB)
   task_type?: TaskType | null;
   source?: string | null;
   phase?: string | null;
@@ -102,15 +84,13 @@ export type EventType = "sow" | "harvest" | "delivery" | "other";
 export type Event = {
   id: string;
   title: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   type: EventType;
   orderId?: string | null;
   taskId?: string | null;
   created_at?: string;
 };
 
-// Minimal Variety shape used across the app.
-// (Some screens call it `name`, some DBs use `variety`.)
 export type Variety = {
   id: string;
   name: string;
@@ -126,31 +106,48 @@ function assertOk<T>(data: T | null, error: any) {
   return data as T;
 }
 
+async function getCurrentAccountId(): Promise<string> {
+  const {
+    data: { user },
+    error: userErr,
+  } = await supabase.auth.getUser();
+
+  if (userErr) throw new Error(userErr.message);
+  if (!user) throw new Error("No signed-in user found.");
+
+  const { data, error } = await supabase
+    .from("profiles")
+    .select("account_id")
+    .eq("id", user.id)
+    .single();
+
+  if (error) throw new Error(error.message);
+  if (!data?.account_id) throw new Error("No account linked to this user.");
+
+  return data.account_id as string;
+}
+
 function mapCustomer(r: any): Customer {
   return {
     id: r.id,
+    account_id: r.account_id ?? null,
     name: r.name ?? "",
     contact: r.contact ?? undefined,
-
     contactName: r.contact_name ?? undefined,
     email: r.email ?? undefined,
     phone: r.phone ?? undefined,
-
     addressLine1: r.address_line1 ?? undefined,
     addressLine2: r.address_line2 ?? undefined,
     city: r.city ?? undefined,
     state: r.state ?? undefined,
     zip: r.zip ?? undefined,
-
     deliveryDays: Array.isArray(r.delivery_days) ? r.delivery_days : [],
     deliveryWindow: r.delivery_window ?? undefined,
     dropoffInstructions: r.dropoff_instructions ?? undefined,
-
     priceTier: r.price_tier ?? undefined,
     paymentTerms: r.payment_terms ?? undefined,
     preferredPaymentMethod: r.preferred_payment_method ?? undefined,
     taxExempt: Boolean(r.tax_exempt),
-
     packagingPrefs: r.packaging_prefs ?? {},
     tags: Array.isArray(r.tags) ? r.tags : [],
     standingOrders: Array.isArray(r.standing_orders) ? r.standing_orders : [],
@@ -188,38 +185,40 @@ function addToMap(map: Map<string, number>, key: string, qty: number) {
 /* ----------------- Customers ----------------- */
 
 export async function getCustomers(): Promise<Customer[]> {
-  const { data, error } = await supabase.from("customers").select("*").order("name", {
-    ascending: true,
-  });
+  const accountId = await getCurrentAccountId();
+
+  const { data, error } = await supabase
+    .from("customers")
+    .select("*")
+    .eq("account_id", accountId)
+    .order("name", { ascending: true });
 
   const rows = assertOk<any[]>(data ?? [], error);
   return rows.map(mapCustomer);
 }
 
 export async function addCustomer(input: Omit<Customer, "id">): Promise<Customer> {
+  const accountId = await getCurrentAccountId();
+
   const payload = {
+    account_id: accountId,
     name: input.name.trim(),
     contact: input.contact?.trim() || null,
-
     contact_name: input.contactName?.trim() || null,
     email: input.email?.trim() || null,
     phone: input.phone?.trim() || null,
-
     address_line1: input.addressLine1?.trim() || null,
     address_line2: input.addressLine2?.trim() || null,
     city: input.city?.trim() || null,
     state: input.state?.trim() || null,
     zip: input.zip?.trim() || null,
-
     delivery_days: input.deliveryDays ?? [],
     delivery_window: input.deliveryWindow?.trim() || null,
     dropoff_instructions: input.dropoffInstructions?.trim() || null,
-
     price_tier: input.priceTier ?? "standard",
     payment_terms: input.paymentTerms ?? "due_on_receipt",
     preferred_payment_method: input.preferredPaymentMethod?.trim() || null,
     tax_exempt: input.taxExempt ?? false,
-
     packaging_prefs: input.packagingPrefs ?? {},
     tags: input.tags ?? [],
     standing_orders: input.standingOrders ?? [],
@@ -236,32 +235,28 @@ export async function updateCustomer(
   id: string,
   input: Partial<Omit<Customer, "id">>
 ): Promise<Customer> {
+  const accountId = await getCurrentAccountId();
   const payload: any = {};
 
   if (input.name !== undefined) payload.name = input.name;
   if (input.contact !== undefined) payload.contact = input.contact ?? null;
-
   if (input.contactName !== undefined) payload.contact_name = input.contactName ?? null;
   if (input.email !== undefined) payload.email = input.email ?? null;
   if (input.phone !== undefined) payload.phone = input.phone ?? null;
-
   if (input.addressLine1 !== undefined) payload.address_line1 = input.addressLine1 ?? null;
   if (input.addressLine2 !== undefined) payload.address_line2 = input.addressLine2 ?? null;
   if (input.city !== undefined) payload.city = input.city ?? null;
   if (input.state !== undefined) payload.state = input.state ?? null;
   if (input.zip !== undefined) payload.zip = input.zip ?? null;
-
   if (input.deliveryDays !== undefined) payload.delivery_days = input.deliveryDays ?? [];
   if (input.deliveryWindow !== undefined) payload.delivery_window = input.deliveryWindow ?? null;
   if (input.dropoffInstructions !== undefined)
     payload.dropoff_instructions = input.dropoffInstructions ?? null;
-
   if (input.priceTier !== undefined) payload.price_tier = input.priceTier ?? "standard";
   if (input.paymentTerms !== undefined) payload.payment_terms = input.paymentTerms ?? "due_on_receipt";
   if (input.preferredPaymentMethod !== undefined)
     payload.preferred_payment_method = input.preferredPaymentMethod ?? null;
   if (input.taxExempt !== undefined) payload.tax_exempt = Boolean(input.taxExempt);
-
   if (input.packagingPrefs !== undefined) payload.packaging_prefs = input.packagingPrefs ?? {};
   if (input.tags !== undefined) payload.tags = input.tags ?? [];
   if (input.standingOrders !== undefined) payload.standing_orders = input.standingOrders ?? [];
@@ -272,47 +267,62 @@ export async function updateCustomer(
     .from("customers")
     .update(payload)
     .eq("id", id)
+    .eq("account_id", accountId)
     .select("*")
     .single();
+
   const row = assertOk<any>(data, error);
   return mapCustomer(row);
 }
 
 /* ----------------- Varieties ----------------- */
 
-// ✅ Used by New Order + Production Sheet.
-// Your DB seems to store variety name as `variety` and days as `harvest_days`.
-// Some parts of the app expect `name` + `daysToHarvest`.
 export async function fetchVarietiesForOrders(): Promise<Variety[]> {
+  const accountId = await getCurrentAccountId();
+
   const { data, error } = await supabase
     .from("varieties")
     .select("id, variety, harvest_days, blackout_days, soak_hours")
+    .eq("account_id", accountId)
+    .is("disabled_at", null)
     .order("variety", { ascending: true });
 
   const rows = assertOk<any[]>(data ?? [], error);
 
-  return rows.map((r) => ({
-    id: r.id,
-    name: (r.variety ?? "").toString(),
-    daysToHarvest: Number(r.harvest_days ?? 0),
-    blackoutDays: Number(r.blackout_days ?? 0),
-    soakHours: Number(r.soak_hours ?? 0),
-  }));
+  const map = new Map<string, Variety>();
+
+  for (const r of rows) {
+    const key = String(r.variety ?? "").trim().toLowerCase();
+    if (!key || map.has(key)) continue;
+
+    map.set(key, {
+      id: r.id,
+      name: String(r.variety ?? ""),
+      daysToHarvest: Number(r.harvest_days ?? 0),
+      blackoutDays: Number(r.blackout_days ?? 0),
+      soakHours: Number(r.soak_hours ?? 0),
+    });
+  }
+
+  return Array.from(map.values());
 }
 
 /* ----------------- Orders ----------------- */
 
 export async function getOrders(): Promise<Order[]> {
-  const { data: auth } = await supabase.auth.getUser();
-  if (!auth.user) return [];
+  const accountId = await getCurrentAccountId();
 
-  const { data, error } = await supabase.from("orders").select("*").order("delivery_date", {
-    ascending: true,
-  });
+  const { data, error } = await supabase
+    .from("orders")
+    .select("*")
+    .eq("account_id", accountId)
+    .order("delivery_date", { ascending: true });
 
   const rows = assertOk<any[]>(data ?? [], error);
+
   return rows.map((r) => ({
     id: r.id,
+    account_id: r.account_id ?? null,
     customerId: r.customer_id,
     varietyId: r.variety_id,
     quantity: Number(r.quantity ?? 0),
@@ -326,38 +336,47 @@ export async function addOrder(input: {
   customerId: string;
   varietyId: string;
   quantity: number;
-  deliveryDate: string; // YYYY-MM-DD
+  deliveryDate: string;
   status: OrderStatus;
+  account_id?: string | null;
+  notes?: string;
+  seedGramsPerTray?: number;
+  packSize?: string;
 }): Promise<Order> {
+  const accountId = input.account_id || (await getCurrentAccountId());
+
   const payload = {
+    account_id: accountId,
     customer_id: input.customerId,
     variety_id: input.varietyId,
     quantity: Number(input.quantity),
     delivery_date: input.deliveryDate,
     status: input.status,
+    notes: input.notes ?? null,
+    seed_grams_per_tray: input.seedGramsPerTray ?? null,
+    pack_size: input.packSize ?? null,
   };
 
-  // 1) Create the order
   const { data, error } = await supabase.from("orders").insert(payload).select("*").single();
   const r = assertOk<any>(data, error);
 
-  // 2) ALSO create a grow batch so "Active Trays" enforcement works
-  // account_id should auto-fill via DB default (current_account_id()).
   const growPayload = {
+    account_id: accountId,
     variety_id: input.varietyId,
     tray_count: Number(input.quantity),
     status: "seeded",
   };
 
   const { error: gErr } = await supabase.from("grows").insert(growPayload);
+
   if (gErr) {
-    // Best-effort rollback: delete the order we just created
-    await supabase.from("orders").delete().eq("id", r.id);
+    await supabase.from("orders").delete().eq("id", r.id).eq("account_id", accountId);
     throw new Error(gErr.message);
   }
 
   return {
     id: r.id,
+    account_id: r.account_id ?? null,
     customerId: r.customer_id,
     varietyId: r.variety_id,
     quantity: Number(r.quantity ?? 0),
@@ -367,28 +386,39 @@ export async function addOrder(input: {
   };
 }
 
-// ✅ Needed by some screens that update multiple order rows.
 export async function updateOrderStatus(orderId: string, status: OrderStatus): Promise<void> {
-  const { error } = await supabase.from("orders").update({ status }).eq("id", orderId);
+  const accountId = await getCurrentAccountId();
+
+  const { error } = await supabase
+    .from("orders")
+    .update({ status })
+    .eq("id", orderId)
+    .eq("account_id", accountId);
+
   if (error) throw new Error(error.message);
 }
 
 /* ----------------- Tasks ----------------- */
 
 export async function getTasks(): Promise<Task[]> {
-  const { data, error } = await supabase.from("tasks").select("*").order("due_date", {
-    ascending: true,
-  });
+  const accountId = await getCurrentAccountId();
+
+  const { data, error } = await supabase
+    .from("tasks")
+    .select("*")
+    .eq("account_id", accountId)
+    .order("due_date", { ascending: true });
 
   const rows = assertOk<any[]>(data ?? [], error);
+
   return rows.map((r) => ({
     id: r.id,
+    account_id: r.account_id ?? null,
     title: r.title,
     dueDate: r.due_date,
     status: (r.status as TaskStatus) ?? "planned",
     orderId: r.order_id ?? null,
     created_at: r.created_at,
-
     task_type: (r.task_type as TaskType) ?? null,
     source: r.source ?? null,
     phase: r.phase ?? null,
@@ -398,11 +428,14 @@ export async function getTasks(): Promise<Task[]> {
 
 export async function addTask(input: {
   title: string;
-  dueDate: string; // YYYY-MM-DD
+  dueDate: string;
   status: TaskStatus;
   orderId?: string;
 }): Promise<Task> {
+  const accountId = await getCurrentAccountId();
+
   const payload = {
+    account_id: accountId,
     title: input.title.trim(),
     due_date: input.dueDate,
     status: input.status,
@@ -414,12 +447,12 @@ export async function addTask(input: {
 
   return {
     id: r.id,
+    account_id: r.account_id ?? null,
     title: r.title,
     dueDate: r.due_date,
     status: (r.status as TaskStatus) ?? "planned",
     orderId: r.order_id ?? null,
     created_at: r.created_at,
-
     task_type: (r.task_type as TaskType) ?? null,
     source: r.source ?? null,
     phase: r.phase ?? null,
@@ -435,6 +468,7 @@ export async function getEvents(): Promise<Event[]> {
   });
 
   const rows = assertOk<any[]>(data ?? [], error);
+
   return rows.map((r) => ({
     id: r.id,
     title: r.title,
@@ -448,7 +482,7 @@ export async function getEvents(): Promise<Event[]> {
 
 export async function addEvent(input: {
   title: string;
-  date: string; // YYYY-MM-DD
+  date: string;
   type: EventType;
   orderId?: string;
   taskId?: string;
@@ -475,22 +509,22 @@ export async function addEvent(input: {
   };
 }
 
-/* ----------------- Phase Task Sync (grouped SYS + SYS:DETAIL) ----------------- */
+/* ----------------- Phase Task Sync ----------------- */
 
 type PhaseKey = "soak" | "sow" | "spray" | "lights_on" | "water" | "harvest" | "deliver";
 
 function phaseSummaryTitle(key: PhaseKey): string {
   switch (key) {
     case "soak":
-      return "Soak (12h)";
+      return "Soak";
     case "sow":
-      return "Sow + Stack (Blackout)";
+      return "Sow + Stack";
     case "spray":
-      return "Spray (Blackout) — AM/PM as needed";
+      return "Spray / Check Blackout";
     case "lights_on":
-      return "Lights On (Unstack + First Water)";
+      return "Lights On";
     case "water":
-      return "Water (Lights On) — AM/PM as needed";
+      return "Water";
     case "harvest":
       return "Harvest";
     case "deliver":
@@ -516,14 +550,19 @@ function taskTypeForPhase(phase: PhaseKey): TaskType {
       return "delivery";
     case "soak":
     default:
-      return "other"; // DB constraint doesn't include "soak"
+      return "other";
   }
 }
 
 const PHASE_ORDER: PhaseKey[] = ["soak", "sow", "spray", "lights_on", "water", "harvest", "deliver"];
 
-function makeGeneratorKey(due: string, phase: PhaseKey, kind: "summary" | "detail") {
-  return `phase:${due}:${phase}:${kind}`;
+function makeGeneratorKey(
+  accountId: string,
+  due: string,
+  phase: PhaseKey,
+  kind: "summary" | "detail"
+) {
+  return `account:${accountId}:phase:${due}:${phase}:${kind}`;
 }
 
 function sortedEntries(map: Map<string, number>) {
@@ -537,7 +576,9 @@ function groupKey(variety: string, customer: string) {
 }
 
 export async function syncPhaseTasksRange(startYMD: string, days: number) {
+  const accountId = await getCurrentAccountId();
   const dates = listDates(startYMD, days);
+
   if (dates.length === 0) return;
 
   const start = dates[0];
@@ -546,9 +587,10 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
   const { error: delErr } = await supabase
     .from("tasks")
     .delete()
+    .eq("account_id", accountId)
+    .eq("source", "generated")
     .gte("due_date", start)
-    .lte("due_date", end)
-    .eq("source", "generated");
+    .lte("due_date", end);
 
   if (delErr) throw new Error(delErr.message);
 
@@ -557,6 +599,7 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
     .select(
       `
       id,
+      account_id,
       quantity,
       delivery_date,
       status,
@@ -565,6 +608,7 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
       varieties ( id, variety, soak_hours, blackout_days, harvest_days )
     `
     )
+    .eq("account_id", accountId)
     .neq("status", "delivered");
 
   if (oErr) throw new Error(oErr.message);
@@ -572,6 +616,7 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
   const orderRows = (orders ?? []).map((o: any) => {
     const v = o.varieties ?? {};
     const c = o.customers ?? {};
+
     return {
       id: o.id as string,
       qty: Number(o.quantity ?? 0),
@@ -600,6 +645,7 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
     if (existing) return existing;
 
     const mk = () => new Map<string, number>();
+
     const bucket: DayBucket = {
       summary: {
         soak: mk(),
@@ -621,6 +667,7 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
       },
       deliverBreakdown: new Map<string, Map<string, number>>(),
     };
+
     byDay.set(d, bucket);
     return bucket;
   }
@@ -643,15 +690,12 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
     const variety = o.varietyName;
     const customer = o.customerName;
     const detailKey = groupKey(variety, customer);
-
     const packedOnlyDelivery = o.status === "packed";
 
     if (!packedOnlyDelivery) {
-      if (o.soakHours > 0) {
-        if (sowDate >= start && sowDate <= end) {
-          addToMap(ensureDay(sowDate).summary.soak, variety, o.qty);
-          addToMap(ensureDay(sowDate).detail.soak, detailKey, o.qty);
-        }
+      if (o.soakHours > 0 && sowDate >= start && sowDate <= end) {
+        addToMap(ensureDay(sowDate).summary.soak, variety, o.qty);
+        addToMap(ensureDay(sowDate).detail.soak, detailKey, o.qty);
       }
 
       if (sowDate >= start && sowDate <= end) {
@@ -662,6 +706,7 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
       if (o.blackoutDays > 0) {
         const blackoutStart = sowDate;
         const blackoutEnd = addDaysYMD(sowDate, o.blackoutDays - 1);
+
         for (const d of dates) {
           if (d >= blackoutStart && d <= blackoutEnd) {
             addToMap(ensureDay(d).summary.spray, variety, o.qty);
@@ -704,29 +749,32 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
       if (!sumMap || sumMap.size === 0) continue;
 
       tasksToUpsert.push({
+        account_id: accountId,
         title: `SYS:${phaseSummaryTitle(phase)}`,
         due_date: d,
         status: "planned",
         order_id: null,
-
         task_type: taskTypeForPhase(phase),
         source: "generated",
         phase,
-        generator_key: makeGeneratorKey(d, phase, "summary"),
+        generator_key: makeGeneratorKey(accountId, d, phase, "summary"),
       });
 
       let detailText = "";
 
       if (phase === "deliver") {
         const customers = sortedEntries(bucket.detail.deliver);
+
         detailText = customers
           .map((c) => {
             const breakdown = bucket.deliverBreakdown.get(c.label) ?? new Map<string, number>();
+
             const parts = Array.from(breakdown.entries())
               .map(([v, q]) => ({ v, q }))
               .sort((a, b) => b.q - a.q || a.v.localeCompare(b.v))
               .map((x) => `${x.v} x${x.q}`)
               .join(", ");
+
             return `${c.label} — ${c.qty} trays${parts ? ` (${parts})` : ""}`;
           })
           .join(" • ");
@@ -737,15 +785,15 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
       }
 
       tasksToUpsert.push({
+        account_id: accountId,
         title: `SYS:DETAIL:${phaseSummaryTitle(phase)} — ${detailText}`,
         due_date: d,
         status: "planned",
         order_id: null,
-
         task_type: taskTypeForPhase(phase),
         source: "generated",
         phase,
-        generator_key: makeGeneratorKey(d, phase, "detail"),
+        generator_key: makeGeneratorKey(accountId, d, phase, "detail"),
       });
     }
   }
@@ -753,7 +801,7 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
   if (tasksToUpsert.length > 0) {
     const { error: insErr } = await supabase
       .from("tasks")
-      .upsert(tasksToUpsert, { onConflict: "source,generator_key" });
+      .upsert(tasksToUpsert, { onConflict: "account_id,generator_key" });
 
     if (insErr) throw new Error(insErr.message);
   }
@@ -763,26 +811,20 @@ export async function syncDailyPhaseTasks(todayYMD: string) {
   return syncPhaseTasksRange(todayYMD, 1);
 }
 
-/* ----------------- "*SB" compatibility exports ----------------- */
-/* These prevent “does not provide an export named …” errors across pages. */
+/* ----------------- Compatibility exports ----------------- */
 
-// Customers
 export const getCustomersSB = getCustomers;
 export const addCustomerSB = addCustomer;
 export const updateCustomerSB = updateCustomer;
 
-// Varieties
 export const fetchVarietiesForOrdersSB = fetchVarietiesForOrders;
 
-// Orders
 export const getOrdersSB = getOrders;
 export const addOrderSB = addOrder;
 export const updateOrderStatusSB = updateOrderStatus;
 
-// Tasks
 export const getTasksSB = getTasks;
 export const addTaskSB = addTask;
 
-// Events
 export const getEventsSB = getEvents;
 export const addEventSB = addEvent;
