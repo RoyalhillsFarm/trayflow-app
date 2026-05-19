@@ -39,18 +39,6 @@ export type Customer = {
 };
 
 export type OrderStatus = "draft" | "confirmed" | "packed" | "delivered";
-
-export type Order = {
-  id: string;
-  account_id?: string | null;
-  customerId: string;
-  varietyId: string;
-  quantity: number;
-  deliveryDate: string;
-  status: OrderStatus;
-  created_at?: string;
-};
-
 export type TaskStatus = "planned" | "in_progress" | "ready" | "delivered" | "done";
 
 export type TaskType =
@@ -62,6 +50,17 @@ export type TaskType =
   | "harvest"
   | "delivery"
   | "other";
+
+export type Order = {
+  id: string;
+  account_id?: string | null;
+  customerId: string;
+  varietyId: string;
+  quantity: number;
+  deliveryDate: string;
+  status: OrderStatus;
+  created_at?: string;
+};
 
 export type Task = {
   id: string;
@@ -153,10 +152,9 @@ function mapCustomer(r: any): Customer {
 }
 
 function toUtcYMD(d: Date) {
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
-  return `${yyyy}-${mm}-${dd}`;
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, "0")}-${String(
+    d.getUTCDate()
+  ).padStart(2, "0")}`;
 }
 
 function addDaysYMD(ymd: string, days: number) {
@@ -174,11 +172,7 @@ function listDates(startYMD: string, days: number): string[] {
   return Array.from({ length: Math.max(0, days) }, (_, i) => addDaysYMD(startYMD, i));
 }
 
-function addToMap(map: Map<string, number>, key: string, qty: number) {
-  map.set(key, (map.get(key) ?? 0) + Number(qty || 0));
-}
-
-/* ----------------- Customers ----------------- */
+/* ---------------- Customers ---------------- */
 
 export async function getCustomers(): Promise<Customer[]> {
   const accountId = await getCurrentAccountId();
@@ -187,10 +181,10 @@ export async function getCustomers(): Promise<Customer[]> {
     .from("customers")
     .select("*")
     .eq("account_id", accountId)
+    .eq("active", true)
     .order("name", { ascending: true });
 
-  const rows = assertOk<any[]>(data ?? [], error);
-  return rows.map(mapCustomer);
+  return assertOk<any[]>(data ?? [], error).map(mapCustomer);
 }
 
 export async function addCustomer(input: Omit<Customer, "id">): Promise<Customer> {
@@ -223,8 +217,7 @@ export async function addCustomer(input: Omit<Customer, "id">): Promise<Customer
   };
 
   const { data, error } = await supabase.from("customers").insert(payload).select("*").single();
-  const row = assertOk<any>(data, error);
-  return mapCustomer(row);
+  return mapCustomer(assertOk<any>(data, error));
 }
 
 export async function updateCustomer(
@@ -246,12 +239,10 @@ export async function updateCustomer(
   if (input.zip !== undefined) payload.zip = input.zip ?? null;
   if (input.deliveryDays !== undefined) payload.delivery_days = input.deliveryDays ?? [];
   if (input.deliveryWindow !== undefined) payload.delivery_window = input.deliveryWindow ?? null;
-  if (input.dropoffInstructions !== undefined)
-    payload.dropoff_instructions = input.dropoffInstructions ?? null;
+  if (input.dropoffInstructions !== undefined) payload.dropoff_instructions = input.dropoffInstructions ?? null;
   if (input.priceTier !== undefined) payload.price_tier = input.priceTier ?? "standard";
   if (input.paymentTerms !== undefined) payload.payment_terms = input.paymentTerms ?? "due_on_receipt";
-  if (input.preferredPaymentMethod !== undefined)
-    payload.preferred_payment_method = input.preferredPaymentMethod ?? null;
+  if (input.preferredPaymentMethod !== undefined) payload.preferred_payment_method = input.preferredPaymentMethod ?? null;
   if (input.taxExempt !== undefined) payload.tax_exempt = Boolean(input.taxExempt);
   if (input.packagingPrefs !== undefined) payload.packaging_prefs = input.packagingPrefs ?? {};
   if (input.tags !== undefined) payload.tags = input.tags ?? [];
@@ -267,11 +258,10 @@ export async function updateCustomer(
     .select("*")
     .single();
 
-  const row = assertOk<any>(data, error);
-  return mapCustomer(row);
+  return mapCustomer(assertOk<any>(data, error));
 }
 
-/* ----------------- Varieties ----------------- */
+/* ---------------- Varieties ---------------- */
 
 export async function fetchVarietiesForOrders(): Promise<Variety[]> {
   const accountId = await getCurrentAccountId();
@@ -284,7 +274,6 @@ export async function fetchVarietiesForOrders(): Promise<Variety[]> {
     .order("variety", { ascending: true });
 
   const rows = assertOk<any[]>(data ?? [], error);
-
   const map = new Map<string, Variety>();
 
   for (const r of rows) {
@@ -303,7 +292,7 @@ export async function fetchVarietiesForOrders(): Promise<Variety[]> {
   return Array.from(map.values());
 }
 
-/* ----------------- Orders ----------------- */
+/* ---------------- Orders ---------------- */
 
 export async function getOrders(): Promise<Order[]> {
   const accountId = await getCurrentAccountId();
@@ -314,9 +303,7 @@ export async function getOrders(): Promise<Order[]> {
     .eq("account_id", accountId)
     .order("delivery_date", { ascending: true });
 
-  const rows = assertOk<any[]>(data ?? [], error);
-
-  return rows.map((r) => ({
+  return assertOk<any[]>(data ?? [], error).map((r) => ({
     id: r.id,
     account_id: r.account_id ?? null,
     customerId: r.customer_id,
@@ -335,9 +322,6 @@ export async function addOrder(input: {
   deliveryDate: string;
   status: OrderStatus;
   account_id?: string | null;
-  notes?: string;
-  seedGramsPerTray?: number;
-  packSize?: string;
 }): Promise<Order> {
   const accountId = input.account_id || (await getCurrentAccountId());
 
@@ -353,18 +337,16 @@ export async function addOrder(input: {
   const { data, error } = await supabase.from("orders").insert(payload).select("*").single();
   const r = assertOk<any>(data, error);
 
-  const growPayload = {
+  const { error: growErr } = await supabase.from("grows").insert({
     account_id: accountId,
     variety_id: input.varietyId,
     tray_count: Number(input.quantity),
     status: "seeded",
-  };
+  });
 
-  const { error: gErr } = await supabase.from("grows").insert(growPayload);
-
-  if (gErr) {
+  if (growErr) {
     await supabase.from("orders").delete().eq("id", r.id).eq("account_id", accountId);
-    throw new Error(gErr.message);
+    throw new Error(growErr.message);
   }
 
   return {
@@ -391,7 +373,7 @@ export async function updateOrderStatus(orderId: string, status: OrderStatus): P
   if (error) throw new Error(error.message);
 }
 
-/* ----------------- Tasks ----------------- */
+/* ---------------- Tasks ---------------- */
 
 export async function getTasks(): Promise<Task[]> {
   const accountId = await getCurrentAccountId();
@@ -402,9 +384,7 @@ export async function getTasks(): Promise<Task[]> {
     .eq("account_id", accountId)
     .order("due_date", { ascending: true });
 
-  const rows = assertOk<any[]>(data ?? [], error);
-
-  return rows.map((r) => ({
+  return assertOk<any[]>(data ?? [], error).map((r) => ({
     id: r.id,
     account_id: r.account_id ?? null,
     title: r.title,
@@ -453,16 +433,12 @@ export async function addTask(input: {
   };
 }
 
-/* ----------------- Events ----------------- */
+/* ---------------- Events ---------------- */
 
 export async function getEvents(): Promise<Event[]> {
-  const { data, error } = await supabase.from("events").select("*").order("date", {
-    ascending: true,
-  });
+  const { data, error } = await supabase.from("events").select("*").order("date", { ascending: true });
 
-  const rows = assertOk<any[]>(data ?? [], error);
-
-  return rows.map((r) => ({
+  return assertOk<any[]>(data ?? [], error).map((r) => ({
     id: r.id,
     title: r.title,
     date: r.date,
@@ -502,82 +478,69 @@ export async function addEvent(input: {
   };
 }
 
-/* ----------------- Phase Task Sync ----------------- */
+/* ---------------- Generated Task Engine ---------------- */
 
 type PhaseKey = "soak" | "sow" | "spray" | "lights_on" | "water" | "harvest" | "deliver";
 
-function phaseSummaryTitle(key: PhaseKey): string {
-  switch (key) {
-    case "soak":
-      return "Soak";
-    case "sow":
-      return "Sow + Stack";
-    case "spray":
-      return "Spray / Check Blackout";
-    case "lights_on":
-      return "Lights On";
-    case "water":
-      return "Water";
-    case "harvest":
-      return "Harvest";
-    case "deliver":
-      return "Deliver";
-    default:
-      return "Task";
-  }
-}
-
 function taskTypeForPhase(phase: PhaseKey): TaskType {
-  switch (phase) {
-    case "sow":
-      return "sow";
-    case "spray":
-      return "spray";
-    case "lights_on":
-      return "lights_on";
-    case "water":
-      return "water";
-    case "harvest":
-      return "harvest";
-    case "deliver":
-      return "delivery";
-    case "soak":
-    default:
-      return "other";
+  if (phase === "sow") return "sow";
+  if (phase === "spray") return "spray";
+  if (phase === "lights_on") return "lights_on";
+  if (phase === "water") return "water";
+  if (phase === "harvest") return "harvest";
+  if (phase === "deliver") return "delivery";
+  return "other";
+}
+
+function phaseLabel(phase: PhaseKey) {
+  if (phase === "soak") return "Soak";
+  if (phase === "sow") return "Sow + Stack";
+  if (phase === "spray") return "Spray / Check Blackout";
+  if (phase === "lights_on") return "Lights On";
+  if (phase === "water") return "Water";
+  if (phase === "harvest") return "Harvest";
+  if (phase === "deliver") return "Deliver";
+  return "Task";
+}
+
+function generatorKey(accountId: string, orderId: string, phase: PhaseKey, dueDate: string) {
+  return `account:${accountId}:order:${orderId}:phase:${phase}:due:${dueDate}`;
+}
+
+function addGeneratedTask(
+  tasks: any[],
+  args: {
+    accountId: string;
+    orderId: string;
+    phase: PhaseKey;
+    dueDate: string;
+    varietyName: string;
+    customerName: string;
+    qty: number;
   }
-}
-
-const PHASE_ORDER: PhaseKey[] = ["soak", "sow", "spray", "lights_on", "water", "harvest", "deliver"];
-
-function makeGeneratorKey(
-  accountId: string,
-  due: string,
-  phase: PhaseKey,
-  kind: "summary" | "detail"
 ) {
-  return `account:${accountId}:phase:${due}:${phase}:${kind}`;
-}
-
-function sortedEntries(map: Map<string, number>) {
-  return Array.from(map.entries())
-    .map(([label, qty]) => ({ label, qty }))
-    .sort((a, b) => b.qty - a.qty || a.label.localeCompare(b.label));
-}
-
-function groupKey(variety: string, customer: string) {
-  return `${variety} → ${customer}`;
+  tasks.push({
+    account_id: args.accountId,
+    title: `${phaseLabel(args.phase)} — ${args.varietyName} → ${args.customerName} x${args.qty}`,
+    due_date: args.dueDate,
+    status: "planned",
+    order_id: args.orderId,
+    task_type: taskTypeForPhase(args.phase),
+    source: "generated",
+    phase: args.phase,
+    generator_key: generatorKey(args.accountId, args.orderId, args.phase, args.dueDate),
+  });
 }
 
 export async function syncPhaseTasksRange(startYMD: string, days: number) {
   const accountId = await getCurrentAccountId();
   const dates = listDates(startYMD, days);
-
   if (dates.length === 0) return;
 
   const start = dates[0];
   const end = dates[dates.length - 1];
 
-  const { error: delErr } = await supabase
+  const { error: deleteErr } = await supabase
     .from("tasks")
     .delete()
     .eq("account_id", accountId)
@@ -585,9 +548,9 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
     .gte("due_date", start)
     .lte("due_date", end);
 
-  if (delErr) throw new Error(delErr.message);
+  if (deleteErr) throw new Error(deleteErr.message);
 
-  const { data: orders, error: oErr } = await supabase
+  const { data, error } = await supabase
     .from("orders")
     .select(
       `
@@ -604,199 +567,73 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
     .eq("account_id", accountId)
     .neq("status", "delivered");
 
-  if (oErr) throw new Error(oErr.message);
+  if (error) throw new Error(error.message);
 
-  const orderRows = (orders ?? []).map((o: any) => {
-    const v = o.varieties ?? {};
-    const c = o.customers ?? {};
+  const tasks: any[] = [];
 
-    return {
-      id: o.id as string,
-      qty: Number(o.quantity ?? 0),
-      deliveryDate: o.delivery_date as string,
-      status: (o.status as OrderStatus) ?? "draft",
-      varietyName: (v.variety ?? "Variety") as string,
-      soakHours: Number(v.soak_hours ?? 0),
-      blackoutDays: Number(v.blackout_days ?? 0),
-      harvestDays: Number(v.harvest_days ?? 0),
-      customerName: (c.name ?? "Customer") as string,
-    };
-  });
+  for (const o of data ?? []) {
+    const v: any = (o as any).varieties ?? {};
+    const c: any = (o as any).customers ?? {};
 
-  if (orderRows.length === 0) return;
+    const orderId = String((o as any).id);
+    const qty = Number((o as any).quantity ?? 0);
+    const deliveryDate = String((o as any).delivery_date);
+    const status = ((o as any).status as OrderStatus) ?? "draft";
 
-  type DayBucket = {
-    summary: Record<PhaseKey, Map<string, number>>;
-    detail: Record<PhaseKey, Map<string, number>>;
-    deliverBreakdown: Map<string, Map<string, number>>;
-  };
+    const varietyName = String(v.variety ?? "Variety");
+    const customerName = String(c.name ?? "Customer");
 
-  const byDay = new Map<string, DayBucket>();
+    const harvestDays = Number(v.harvest_days ?? 0);
+    const blackoutDays = Number(v.blackout_days ?? 0);
+    const soakHours = Number(v.soak_hours ?? 0);
 
-  function ensureDay(d: string): DayBucket {
-    const existing = byDay.get(d);
-    if (existing) return existing;
+    const sowDate = harvestDays > 0 ? subtractDaysYMD(deliveryDate, harvestDays) : deliveryDate;
+    const harvestDate = subtractDaysYMD(deliveryDate, 1);
+    const lightsOnDate = blackoutDays > 0 ? addDaysYMD(sowDate, blackoutDays) : sowDate;
 
-    const mk = () => new Map<string, number>();
-
-    const bucket: DayBucket = {
-      summary: {
-        soak: mk(),
-        sow: mk(),
-        spray: mk(),
-        lights_on: mk(),
-        water: mk(),
-        harvest: mk(),
-        deliver: mk(),
-      },
-      detail: {
-        soak: mk(),
-        sow: mk(),
-        spray: mk(),
-        lights_on: mk(),
-        water: mk(),
-        harvest: mk(),
-        deliver: mk(),
-      },
-      deliverBreakdown: new Map<string, Map<string, number>>(),
-    };
-
-    byDay.set(d, bucket);
-    return bucket;
-  }
-
-  function addDelivery(due: string, customer: string, variety: string, trays: number) {
-    const b = ensureDay(due);
-    addToMap(b.summary.deliver, customer, trays);
-    addToMap(b.detail.deliver, customer, trays);
-
-    const m = b.deliverBreakdown.get(customer) ?? new Map<string, number>();
-    m.set(variety, (m.get(variety) ?? 0) + Number(trays || 0));
-    b.deliverBreakdown.set(customer, m);
-  }
-
-  for (const o of orderRows) {
-    const sowDate = o.harvestDays > 0 ? subtractDaysYMD(o.deliveryDate, o.harvestDays) : o.deliveryDate;
-    const harvestDate = subtractDaysYMD(o.deliveryDate, 1);
-    const lightsOnDate = o.blackoutDays > 0 ? addDaysYMD(sowDate, o.blackoutDays) : sowDate;
-
-    const variety = o.varietyName;
-    const customer = o.customerName;
-    const detailKey = groupKey(variety, customer);
-    const packedOnlyDelivery = o.status === "packed";
+    const packedOnlyDelivery = status === "packed";
 
     if (!packedOnlyDelivery) {
-      if (o.soakHours > 0 && sowDate >= start && sowDate <= end) {
-        addToMap(ensureDay(sowDate).summary.soak, variety, o.qty);
-        addToMap(ensureDay(sowDate).detail.soak, detailKey, o.qty);
+      if (soakHours > 0 && sowDate >= start && sowDate <= end) {
+        addGeneratedTask(tasks, { accountId, orderId, phase: "soak", dueDate: sowDate, varietyName, customerName, qty });
       }
 
       if (sowDate >= start && sowDate <= end) {
-        addToMap(ensureDay(sowDate).summary.sow, variety, o.qty);
-        addToMap(ensureDay(sowDate).detail.sow, detailKey, o.qty);
+        addGeneratedTask(tasks, { accountId, orderId, phase: "sow", dueDate: sowDate, varietyName, customerName, qty });
       }
 
-      if (o.blackoutDays > 0) {
-        const blackoutStart = sowDate;
-        const blackoutEnd = addDaysYMD(sowDate, o.blackoutDays - 1);
-
+      if (blackoutDays > 0) {
+        const blackoutEnd = addDaysYMD(sowDate, blackoutDays - 1);
         for (const d of dates) {
-          if (d >= blackoutStart && d <= blackoutEnd) {
-            addToMap(ensureDay(d).summary.spray, variety, o.qty);
-            addToMap(ensureDay(d).detail.spray, detailKey, o.qty);
+          if (d >= sowDate && d <= blackoutEnd) {
+            addGeneratedTask(tasks, { accountId, orderId, phase: "spray", dueDate: d, varietyName, customerName, qty });
           }
         }
       }
 
       if (lightsOnDate >= start && lightsOnDate <= end && lightsOnDate <= harvestDate) {
-        addToMap(ensureDay(lightsOnDate).summary.lights_on, variety, o.qty);
-        addToMap(ensureDay(lightsOnDate).detail.lights_on, detailKey, o.qty);
+        addGeneratedTask(tasks, { accountId, orderId, phase: "lights_on", dueDate: lightsOnDate, varietyName, customerName, qty });
       }
 
       for (const d of dates) {
         if (d >= lightsOnDate && d <= harvestDate) {
-          addToMap(ensureDay(d).summary.water, variety, o.qty);
-          addToMap(ensureDay(d).detail.water, detailKey, o.qty);
+          addGeneratedTask(tasks, { accountId, orderId, phase: "water", dueDate: d, varietyName, customerName, qty });
         }
       }
 
       if (harvestDate >= start && harvestDate <= end) {
-        addToMap(ensureDay(harvestDate).summary.harvest, variety, o.qty);
-        addToMap(ensureDay(harvestDate).detail.harvest, detailKey, o.qty);
+        addGeneratedTask(tasks, { accountId, orderId, phase: "harvest", dueDate: harvestDate, varietyName, customerName, qty });
       }
     }
 
-    if (o.deliveryDate >= start && o.deliveryDate <= end) {
-      addDelivery(o.deliveryDate, customer, variety, o.qty);
+    if (deliveryDate >= start && deliveryDate <= end) {
+      addGeneratedTask(tasks, { accountId, orderId, phase: "deliver", dueDate: deliveryDate, varietyName, customerName, qty });
     }
   }
 
-  const tasksToUpsert: any[] = [];
-
-  for (const d of dates) {
-    const bucket = byDay.get(d);
-    if (!bucket) continue;
-
-    for (const phase of PHASE_ORDER) {
-      const sumMap = bucket.summary[phase];
-      if (!sumMap || sumMap.size === 0) continue;
-
-      tasksToUpsert.push({
-        account_id: accountId,
-        title: `SYS:${phaseSummaryTitle(phase)}`,
-        due_date: d,
-        status: "planned",
-        order_id: null,
-        task_type: taskTypeForPhase(phase),
-        source: "generated",
-        phase,
-        generator_key: makeGeneratorKey(accountId, d, phase, "summary"),
-      });
-
-      let detailText = "";
-
-      if (phase === "deliver") {
-        const customers = sortedEntries(bucket.detail.deliver);
-
-        detailText = customers
-          .map((c) => {
-            const breakdown = bucket.deliverBreakdown.get(c.label) ?? new Map<string, number>();
-
-            const parts = Array.from(breakdown.entries())
-              .map(([v, q]) => ({ v, q }))
-              .sort((a, b) => b.q - a.q || a.v.localeCompare(b.v))
-              .map((x) => `${x.v} x${x.q}`)
-              .join(", ");
-
-            return `${c.label} — ${c.qty} trays${parts ? ` (${parts})` : ""}`;
-          })
-          .join(" • ");
-      } else {
-        const detMap = bucket.detail[phase];
-        const items = sortedEntries(detMap);
-        detailText = items.map((x) => `${x.label} x${x.qty}`).join(", ");
-      }
-
-      tasksToUpsert.push({
-        account_id: accountId,
-        title: `SYS:DETAIL:${phaseSummaryTitle(phase)} — ${detailText}`,
-        due_date: d,
-        status: "planned",
-        order_id: null,
-        task_type: taskTypeForPhase(phase),
-        source: "generated",
-        phase,
-        generator_key: makeGeneratorKey(accountId, d, phase, "detail"),
-      });
-    }
-  }
-
-  if (tasksToUpsert.length > 0) {
-    const { error: insErr } = await supabase
-  .from("tasks")
-  .insert(tasksToUpsert);
-
-if (insErr) throw new Error(insErr.message);
+  if (tasks.length > 0) {
+    const { error: insertErr } = await supabase.from("tasks").insert(tasks);
+    if (insertErr) throw new Error(insertErr.message);
   }
 }
 
@@ -804,7 +641,7 @@ export async function syncDailyPhaseTasks(todayYMD: string) {
   return syncPhaseTasksRange(todayYMD, 1);
 }
 
-/* ----------------- Compatibility exports ----------------- */
+/* ---------------- Compatibility exports ---------------- */
 
 export const getCustomersSB = getCustomers;
 export const addCustomerSB = addCustomer;
