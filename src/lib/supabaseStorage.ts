@@ -793,10 +793,10 @@ export async function syncPhaseTasksRange(startYMD: string, days: number) {
 
   if (tasksToUpsert.length > 0) {
     const { error: insErr } = await supabase
-      .from("tasks")
-      .upsert(tasksToUpsert, { onConflict: "account_id,generator_key" });
+  .from("tasks")
+  .insert(tasksToUpsert);
 
-    if (insErr) throw new Error(insErr.message);
+if (insErr) throw new Error(insErr.message);
   }
 }
 
