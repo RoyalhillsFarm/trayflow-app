@@ -1,8 +1,6 @@
 // src/lib/supabaseStorage.ts
 import { supabase } from "../utils/supabaseClient";
 
-/* ----------------- Types ----------------- */
-
 export type StandingOrderItem = {
   id: string;
   dayOfWeek: "Mon" | "Tue" | "Wed" | "Thu" | "Fri" | "Sat" | "Sun";
@@ -98,8 +96,6 @@ export type Variety = {
   blackoutDays?: number;
   soakHours?: number;
 };
-
-/* ----------------- Helpers ----------------- */
 
 function assertOk<T>(data: T | null, error: any) {
   if (error) throw new Error(error.message ?? "Supabase error");
@@ -352,9 +348,6 @@ export async function addOrder(input: {
     quantity: Number(input.quantity),
     delivery_date: input.deliveryDate,
     status: input.status,
-    notes: input.notes ?? null,
-    seed_grams_per_tray: input.seedGramsPerTray ?? null,
-    pack_size: input.packSize ?? null,
   };
 
   const { data, error } = await supabase.from("orders").insert(payload).select("*").single();
